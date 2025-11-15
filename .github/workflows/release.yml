@@ -189,6 +189,7 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath ./build/$SCHEME.xcarchive \
+            -derivedDataPath ./build/DerivedData \
             archive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -197,29 +198,37 @@ jobs:
       - name: Create IPA package
         run: |
           mkdir -p ./artifacts
-          cd ./ios/build
-          ARCHIVE_PATH=$(find . -name "*.xcarchive" -maxdepth 1 | head -1)
-          if [ -z "$ARCHIVE_PATH" ]; then
-            echo "Error: No .xcarchive found"
-            exit 1
+          cd ./ios
+          # First try to find app in archive
+          ARCHIVE_PATH=$(find ./build -name "*.xcarchive" -maxdepth 1 | head -1)
+          APP_PATH=""
+          if [ -n "$ARCHIVE_PATH" ]; then
+            ARCHIVE_PATH=$(realpath "$ARCHIVE_PATH" || echo "$ARCHIVE_PATH")
+            echo "Found archive: $ARCHIVE_PATH"
+            echo "Searching archive for .app bundle..."
+            APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -type d 2>/dev/null | head -1)
           fi
-          # Convert to absolute path
-          ARCHIVE_PATH=$(realpath "$ARCHIVE_PATH" || echo "$ARCHIVE_PATH")
-          echo "Found archive: $ARCHIVE_PATH"
-          echo "Archive contents:"
-          ls -la "$ARCHIVE_PATH" || true
-          echo "Looking for .app bundle..."
-          # Search recursively for the app bundle
-          APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -type d | head -1)
+          # If not in archive, check DerivedData build output
           if [ -z "$APP_PATH" ]; then
-            echo "Error: No .app found in archive"
-            echo "Searching archive structure:"
-            find "$ARCHIVE_PATH" -type d -maxdepth 3 | head -20 || true
+            echo "No .app in archive, checking DerivedData..."
+            APP_PATH=$(find ./build/DerivedData -name "*.app" -type d -path "*/Build/Products/Release-iphoneos/*" 2>/dev/null | head -1)
+          fi
+          # If still not found, check any build directory
+          if [ -z "$APP_PATH" ]; then
+            echo "Checking all build directories..."
+            APP_PATH=$(find ./build -name "*.app" -type d | grep -v ".xcarchive" | head -1)
+          fi
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: No .app bundle found"
+            echo "Archive structure:"
+            find ./build -name "*.xcarchive" -exec sh -c 'echo "Archive: $1"; find "$1" -type d -maxdepth 2' _ {} \; || true
+            echo "Build directories:"
+            find ./build -type d -maxdepth 3 | head -20 || true
             exit 1
           fi
           APP_NAME=$(basename "$APP_PATH")
           echo "Found app: $APP_NAME at $APP_PATH"
-          cd ../../artifacts
+          cd ../artifacts
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r smart-habit-${{ needs.version.outputs.new_release_version }}.ipa Payload
