@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.2...v1.0.3) (2025-11-15)
+
+
+### 🐛 Bug Fixes
+
+* resolves ipa artifact issues, resolves release being skipped, optimizes the android build workflow ([2c71ce6](https://github.com/cayubweeums-repos/smart_habit/commit/2c71ce6fb3994d18cd12e8f1d9c44832171efd0c))
+
 ## [1.0.2](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.1...v1.0.2) (2025-11-15)
 
 
