@@ -93,6 +93,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
+            android/.gradle-build-cache
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
@@ -119,16 +120,31 @@ jobs:
           # Only add settings that don't already exist
           grep -q "org.gradle.parallel" gradle.properties || echo "org.gradle.parallel=true" >> gradle.properties
           grep -q "org.gradle.caching" gradle.properties || echo "org.gradle.caching=true" >> gradle.properties
-          grep -q "org.gradle.jvmargs" gradle.properties || echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
+          # Optimize JVM - use more memory and enable GC optimizations
+          grep -q "org.gradle.jvmargs" gradle.properties || echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:MaxGCPauseMillis=200" >> gradle.properties
+          # Enable configuration cache for faster configuration phase
+          grep -q "org.gradle.configuration-cache" gradle.properties || echo "org.gradle.configuration-cache=true" >> gradle.properties
+          # Enable file system watching for faster incremental builds
+          grep -q "org.gradle.vfs.watch" gradle.properties || echo "org.gradle.vfs.watch=true" >> gradle.properties
 
       - name: Build Android APK
         working-directory: ./android
-        run: ./gradlew assembleRelease --build-cache --parallel --no-daemon --max-workers=2
+        run: |
+          # Use all available CPU cores (remove max-workers restriction)
+          # Only build the release APK, skip tests and other tasks
+          ./gradlew assembleRelease \
+            --build-cache \
+            --parallel \
+            --no-daemon \
+            --configuration-cache \
+            --warn
 
       - name: Rename and move APK
         run: |
           mkdir -p ./artifacts
           cp ./android/app/build/outputs/apk/release/app-release.apk ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.apk
+          # Show APK size for monitoring
+          ls -lh ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.apk
 
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v4
@@ -136,6 +152,8 @@ jobs:
           name: android-build
           path: ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.apk
           retention-days: 1
+          compression-level: 1
+          if-no-files-found: error
 
   build-ios:
     name: Build iOS (Native)
@@ -185,6 +203,7 @@ jobs:
         run: |
           WORKSPACE="${{ steps.ios-config.outputs.workspace }}.xcworkspace"
           SCHEME="${{ steps.ios-config.outputs.scheme }}"
+          # Archive with SKIP_INSTALL=NO to ensure Products directory is populated
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
@@ -193,37 +212,41 @@ jobs:
             archive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            SKIP_INSTALL=NO \
+            INSTALL_PATH=/Applications
 
       - name: Create IPA package
         run: |
           mkdir -p ./artifacts
           cd ./ios
-          # First try to find app in archive
+          # First try to find app in archive Products/Applications (proper archive)
           ARCHIVE_PATH=$(find ./build -name "*.xcarchive" -maxdepth 1 | head -1)
           APP_PATH=""
           if [ -n "$ARCHIVE_PATH" ]; then
             ARCHIVE_PATH=$(realpath "$ARCHIVE_PATH" || echo "$ARCHIVE_PATH")
             echo "Found archive: $ARCHIVE_PATH"
-            echo "Searching archive for .app bundle..."
-            APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -type d 2>/dev/null | head -1)
+            echo "Checking archive Products/Applications..."
+            if [ -d "$ARCHIVE_PATH/Products/Applications" ]; then
+              APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -name "*.app" -type d | head -1)
+            fi
           fi
-          # If not in archive, check DerivedData build output
+          # Fallback: Check DerivedData build output (if archive didn't work)
           if [ -z "$APP_PATH" ]; then
-            echo "No .app in archive, checking DerivedData..."
+            echo "Not in archive, checking DerivedData build output..."
             APP_PATH=$(find ./build/DerivedData -name "*.app" -type d -path "*/Build/Products/Release-iphoneos/*" 2>/dev/null | head -1)
           fi
-          # If still not found, check any build directory
+          # Last resort: search anywhere in build directory
           if [ -z "$APP_PATH" ]; then
-            echo "Checking all build directories..."
+            echo "Searching all build directories..."
             APP_PATH=$(find ./build -name "*.app" -type d | grep -v ".xcarchive" | head -1)
           fi
           if [ -z "$APP_PATH" ]; then
             echo "Error: No .app bundle found"
             echo "Archive structure:"
-            find ./build -name "*.xcarchive" -exec sh -c 'echo "Archive: $1"; find "$1" -type d -maxdepth 2' _ {} \; || true
-            echo "Build directories:"
-            find ./build -type d -maxdepth 3 | head -20 || true
+            [ -n "$ARCHIVE_PATH" ] && find "$ARCHIVE_PATH" -type d -maxdepth 3 || echo "No archive found"
+            echo "DerivedData structure:"
+            find ./build/DerivedData -type d -maxdepth 4 2>/dev/null | head -20 || true
             exit 1
           fi
           APP_NAME=$(basename "$APP_PATH")
