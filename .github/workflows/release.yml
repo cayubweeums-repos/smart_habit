@@ -41,7 +41,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
-    name: Build Android (Local)
+    name: Build Android (Native)
     runs-on: ubuntu-latest
     needs: version
     if: needs.version.outputs.new_release_published == 'true'
@@ -54,11 +54,16 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
-          eas-version: latest
 
       - name: Install dependencies
         run: npm ci
@@ -67,18 +72,30 @@ jobs:
         run: |
           node -e "const fs = require('fs'); const app = JSON.parse(fs.readFileSync('app.json')); app.expo.version = '${{ needs.version.outputs.new_release_version }}'; fs.writeFileSync('app.json', JSON.stringify(app, null, 2));"
 
-      - name: Build Android APK (Local)
-        run: eas build --platform android --profile production --local --output ./smart-habit-${{ needs.version.outputs.new_release_version }}.apk
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Android APK
+        working-directory: ./android
+        run: ./gradlew assembleRelease
+
+      - name: Rename and move APK
+        run: |
+          mkdir -p ./artifacts
+          cp ./android/app/build/outputs/apk/release/app-release.apk ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.apk
 
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-build
-          path: ./smart-habit-${{ needs.version.outputs.new_release_version }}.apk
+          path: ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.apk
           retention-days: 1
 
   build-ios:
-    name: Build iOS (Local)
+    name: Build iOS (Native)
     runs-on: macos-latest
     needs: version
     if: needs.version.outputs.new_release_published == 'true'
@@ -95,7 +112,6 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
-          eas-version: latest
 
       - name: Install dependencies
         run: npm ci
@@ -104,22 +120,52 @@ jobs:
         run: |
           node -e "const fs = require('fs'); const app = JSON.parse(fs.readFileSync('app.json')); app.expo.version = '${{ needs.version.outputs.new_release_version }}'; fs.writeFileSync('app.json', JSON.stringify(app, null, 2));"
 
-      - name: Setup iOS certificates (if needed)
-        # Note: You'll need to add your certificates/provisioning profiles as secrets
-        # and set them up here. For now, this is a placeholder.
-        run: |
-          echo "Setting up iOS certificates..."
-          # Add certificate setup commands here if needed
-          # Example: echo "${{ secrets.IOS_CERTIFICATE }}" | base64 -d > cert.p12
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean
 
-      - name: Build iOS IPA (Local)
-        run: eas build --platform ios --profile production --local --output ./smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
+      - name: Install CocoaPods dependencies
+        working-directory: ./ios
+        run: pod install
+
+      - name: Detect workspace and scheme
+        working-directory: ./ios
+        id: ios-config
+        run: |
+          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1 | xargs basename -s .xcworkspace)
+          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE.xcworkspace" 2>/dev/null | grep -A 100 "Schemes:" | grep -v "Schemes:" | head -1 | xargs || echo "$WORKSPACE")
+          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
+          echo "Found workspace: $WORKSPACE, scheme: $SCHEME"
+
+      - name: Build iOS Archive
+        working-directory: ./ios
+        run: |
+          WORKSPACE="${{ steps.ios-config.outputs.workspace }}.xcworkspace"
+          SCHEME="${{ steps.ios-config.outputs.scheme }}"
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath ./build/$SCHEME.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create IPA package
+        run: |
+          mkdir -p ./artifacts
+          cd ./ios/build
+          ARCHIVE_NAME=$(find . -name "*.xcarchive" -maxdepth 1 | head -1 | xargs basename -s .xcarchive)
+          APP_NAME=$(find "./$ARCHIVE_NAME/Products/Applications" -name "*.app" -maxdepth 1 | head -1 | xargs basename -s .app)
+          mkdir -p Payload
+          cp -r "./$ARCHIVE_NAME/Products/Applications/$APP_NAME.app" Payload/
+          zip -r ../../artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.ipa Payload
 
       - name: Upload iOS IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ios-build
-          path: ./smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
+          path: ./artifacts/smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
           retention-days: 1
 
   release:
