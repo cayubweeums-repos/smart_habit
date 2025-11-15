@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm ci
@@ -40,14 +40,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build:
-    name: Build Apps
+  build-android:
+    name: Build Android (Local)
     runs-on: ubuntu-latest
     needs: version
     if: needs.version.outputs.new_release_published == 'true'
-    strategy:
-      matrix:
-        platform: [android, ios]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,14 +52,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
         run: npm ci
@@ -71,22 +67,20 @@ jobs:
         run: |
           node -e "const fs = require('fs'); const app = JSON.parse(fs.readFileSync('app.json')); app.expo.version = '${{ needs.version.outputs.new_release_version }}'; fs.writeFileSync('app.json', JSON.stringify(app, null, 2));"
 
-      - name: Build Android APK
-        if: matrix.platform == 'android'
-        run: eas build --platform android --profile production --non-interactive --no-wait
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Build Android APK (Local)
+        run: eas build --platform android --profile production --local --output ./smart-habit-${{ needs.version.outputs.new_release_version }}.apk
 
-      - name: Build iOS IPA
-        if: matrix.platform == 'ios'
-        run: eas build --platform ios --profile production --non-interactive --no-wait
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: ./smart-habit-${{ needs.version.outputs.new_release_version }}.apk
+          retention-days: 1
 
-  release:
-    name: Create GitHub Release
-    runs-on: ubuntu-latest
-    needs: [version, build]
+  build-ios:
+    name: Build iOS (Local)
+    runs-on: macos-latest
+    needs: version
     if: needs.version.outputs.new_release_published == 'true'
     steps:
       - name: Checkout code
@@ -95,33 +89,60 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - name: Setup Expo and EAS
+      - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Wait for builds to complete
-        run: |
-          echo "Waiting for builds to complete..."
-          sleep 300  # Wait 5 minutes, adjust as needed
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Download Android APK
+      - name: Update version in app.json
         run: |
-          BUILD_ID=$(eas build:list --platform=android --limit=1 --json --non-interactive | jq -r '.[0].id')
-          eas build:download --id=$BUILD_ID --output=./smart-habit-${{ needs.version.outputs.new_release_version }}.apk
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          node -e "const fs = require('fs'); const app = JSON.parse(fs.readFileSync('app.json')); app.expo.version = '${{ needs.version.outputs.new_release_version }}'; fs.writeFileSync('app.json', JSON.stringify(app, null, 2));"
 
-      - name: Download iOS IPA
+      - name: Setup iOS certificates (if needed)
+        # Note: You'll need to add your certificates/provisioning profiles as secrets
+        # and set them up here. For now, this is a placeholder.
         run: |
-          BUILD_ID=$(eas build:list --platform=ios --limit=1 --json --non-interactive | jq -r '.[0].id')
-          eas build:download --id=$BUILD_ID --output=./smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          echo "Setting up iOS certificates..."
+          # Add certificate setup commands here if needed
+          # Example: echo "${{ secrets.IOS_CERTIFICATE }}" | base64 -d > cert.p12
+
+      - name: Build iOS IPA (Local)
+        run: eas build --platform ios --profile production --local --output ./smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
+
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: ./smart-habit-${{ needs.version.outputs.new_release_version }}.ipa
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [version, build-android, build-ios]
+    if: needs.version.outputs.new_release_published == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Android APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-build
+          path: ./
+        continue-on-error: true
+
+      - name: Download iOS IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-build
+          path: ./
         continue-on-error: true
 
       - name: Create GitHub Release
