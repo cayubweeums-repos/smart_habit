@@ -1,0 +1,287 @@
+import axios from 'axios';
+import { WeatherData, OneCallWeatherData, TemperatureUnit } from '../types';
+
+// Note: One Call API 3.0 requires paid subscription
+const OPENWEATHER_API_KEY = 'c36bb96f19cd98b9f4f0e2d8c7259138';
+const ONECALL_BASE_URL = 'https://api.openweathermap.org/data/3.0/onecall';
+
+/**
+ * Fetch comprehensive weather data using One Call API 3.0
+ * Includes current weather, forecasts (minutely, hourly, daily), and alerts
+ */
+export async function fetchOneCallWeather(
+  latitude: number,
+  longitude: number,
+  temperatureUnit: TemperatureUnit = 'celsius',
+  exclude?: string[] // Optional: exclude parts like 'minutely', 'hourly', 'daily', 'alerts'
+): Promise<OneCallWeatherData | null> {
+  try {
+    const params: any = {
+      lat: latitude,
+      lon: longitude,
+      appid: OPENWEATHER_API_KEY,
+      units: temperatureUnit === 'fahrenheit' ? 'imperial' : 'metric',
+    };
+
+    // Add exclude parameter if provided
+    if (exclude && exclude.length > 0) {
+      params.exclude = exclude.join(',');
+    }
+
+    const response = await axios.get(ONECALL_BASE_URL, { params });
+    
+    return response.data as OneCallWeatherData;
+  } catch (error) {
+    console.error('Error fetching One Call weather:', error);
+    return null;
+  }
+}
+
+/**
+ * Fetch current weather data for given coordinates
+ * Legacy function - now uses One Call API 3.0 but returns simplified data
+ */
+export async function fetchWeatherByCoordinates(
+  latitude: number,
+  longitude: number
+): Promise<WeatherData | null> {
+  try {
+    // Use One Call API excluding minutely, hourly, daily to reduce data transfer
+    const oneCallData = await fetchOneCallWeather(latitude, longitude, 'celsius', ['minutely', 'hourly', 'daily']);
+    
+    if (!oneCallData) {
+      return null;
+    }
+
+    const current = oneCallData.current;
+    
+    return {
+      location: 'Current Location', // One Call API doesn't return location name
+      temperature: Math.round(current.temp),
+      condition: current.weather[0].main,
+      description: current.weather[0].description,
+      humidity: current.humidity,
+      windSpeed: current.wind_speed,
+      icon: current.weather[0].icon,
+      date: new Date(current.dt * 1000).toISOString(),
+    };
+  } catch (error) {
+    console.error('Error fetching weather:', error);
+    return null;
+  }
+}
+
+/**
+ * Fetch weather data by city name
+ * Note: One Call API 3.0 requires lat/lon, so we use geocoding
+ */
+export async function fetchWeatherByCity(cityName: string): Promise<WeatherData | null> {
+  try {
+    // First geocode the city name to get coordinates
+    const geoResponse = await axios.get('http://api.openweathermap.org/geo/1.0/direct', {
+      params: {
+        q: cityName,
+        limit: 1,
+        appid: OPENWEATHER_API_KEY,
+      },
+    });
+
+    if (!geoResponse.data || geoResponse.data.length === 0) {
+      console.error('City not found');
+      return null;
+    }
+
+    const { lat, lon, name } = geoResponse.data[0];
+    
+    // Now fetch weather data
+    const weatherData = await fetchWeatherByCoordinates(lat, lon);
+    
+    if (weatherData) {
+      weatherData.location = name;
+    }
+    
+    return weatherData;
+  } catch (error) {
+    console.error('Error fetching weather by city:', error);
+    return null;
+  }
+}
+
+/**
+ * Get weather icon URL
+ */
+export function getWeatherIconUrl(iconCode: string): string {
+  return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+}
+
+/**
+ * Get weather emoji based on condition
+ */
+export function getWeatherEmoji(condition: string): string {
+  const emojiMap: { [key: string]: string } = {
+    Clear: '☀️',
+    Clouds: '☁️',
+    Rain: '🌧️',
+    Drizzle: '🌦️',
+    Thunderstorm: '⛈️',
+    Snow: '❄️',
+    Mist: '🌫️',
+    Fog: '🌫️',
+    Haze: '🌫️',
+  };
+  
+  return emojiMap[condition] || '🌤️';
+}
+
+/**
+ * Format Unix timestamp to time string (HH:MM)
+ */
+export function formatTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+/**
+ * Format Unix timestamp to date string
+ */
+export function formatDate(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Get alert severity emoji
+ */
+export function getAlertSeverityEmoji(event: string): string {
+  const lowerEvent = event.toLowerCase();
+  
+  if (lowerEvent.includes('tornado') || lowerEvent.includes('hurricane')) {
+    return '🌪️';
+  }
+  if (lowerEvent.includes('flood')) {
+    return '🌊';
+  }
+  if (lowerEvent.includes('fire')) {
+    return '🔥';
+  }
+  if (lowerEvent.includes('heat')) {
+    return '🌡️';
+  }
+  if (lowerEvent.includes('cold') || lowerEvent.includes('freeze')) {
+    return '❄️';
+  }
+  if (lowerEvent.includes('wind')) {
+    return '💨';
+  }
+  if (lowerEvent.includes('snow') || lowerEvent.includes('blizzard')) {
+    return '❄️';
+  }
+  if (lowerEvent.includes('thunderstorm')) {
+    return '⛈️';
+  }
+  if (lowerEvent.includes('fog')) {
+    return '🌫️';
+  }
+  
+  return '⚠️';
+}
+
+/**
+ * Format temperature with appropriate unit symbol
+ */
+export function formatTemperature(temp: number, unit: TemperatureUnit): string {
+  const symbol = unit === 'fahrenheit' ? '°F' : '°C';
+  return `${Math.round(temp)}${symbol}`;
+}
+
+/**
+ * Convert precipitation from mm to inches
+ */
+export function convertPrecipitation(mm: number, targetUnit: 'mm' | 'inches'): number {
+  if (targetUnit === 'inches') {
+    return mm / 25.4; // 1 inch = 25.4 mm
+  }
+  return mm;
+}
+
+/**
+ * Format precipitation with appropriate unit
+ */
+export function formatPrecipitation(mm: number, unit: 'mm' | 'inches'): string {
+  const value = convertPrecipitation(mm, unit);
+  const formatted = unit === 'inches' 
+    ? value.toFixed(2) 
+    : Math.round(value).toString();
+  return `${formatted} ${unit}`;
+}
+
+/**
+ * Convert distance from kilometers to miles
+ */
+export function convertDistance(km: number, targetUnit: 'kilometers' | 'miles'): number {
+  if (targetUnit === 'miles') {
+    return km * 0.621371; // 1 km = 0.621371 miles
+  }
+  return km;
+}
+
+/**
+ * Format distance with appropriate unit
+ */
+export function formatDistance(km: number, unit: 'kilometers' | 'miles'): string {
+  const value = convertDistance(km, unit);
+  const formatted = value.toFixed(2);
+  const unitLabel = unit === 'miles' ? 'mi' : 'km';
+  return `${formatted} ${unitLabel}`;
+}
+
+/**
+ * Geocode a city name to coordinates using OpenWeatherMap Geocoding API
+ * This works in Expo Go (unlike expo-location's geocodeAsync)
+ */
+export async function geocodeCityName(cityName: string): Promise<{
+  latitude: number;
+  longitude: number;
+  displayName: string;
+  state?: string;
+  country?: string;
+} | null> {
+  try {
+    console.log('[WeatherService] Geocoding city:', cityName);
+    
+    const response = await axios.get('http://api.openweathermap.org/geo/1.0/direct', {
+      params: {
+        q: cityName,
+        limit: 1,
+        appid: OPENWEATHER_API_KEY,
+      },
+    });
+
+    console.log('[WeatherService] Geocode response:', response.data);
+
+    if (!response.data || response.data.length === 0) {
+      console.error('[WeatherService] City not found');
+      return null;
+    }
+
+    const location = response.data[0];
+    
+    return {
+      latitude: location.lat,
+      longitude: location.lon,
+      displayName: location.name,
+      state: location.state,
+      country: location.country,
+    };
+  } catch (error) {
+    console.error('[WeatherService] Geocoding error:', error);
+    return null;
+  }
+}
+
