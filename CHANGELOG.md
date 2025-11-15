@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.5...v1.0.6) (2025-11-15)
+
+
+### 🐛 Bug Fixes
+
+* resolves bad iso artifact parsing ([0b7a207](https://github.com/cayubweeums-repos/smart_habit/commit/0b7a207ed9ae3d2991c53df313f3ad4d935d40b1))
+
 ## [1.0.5](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.4...v1.0.5) (2025-11-15)
 
 
