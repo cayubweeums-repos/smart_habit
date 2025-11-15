@@ -60,29 +60,27 @@ export async function scheduleSunriseReminder(
     const enabled = await loadNotificationsEnabled();
     if (!enabled) return null;
 
-    const today = new Date();
+    const now = new Date();
+    const today = new Date(now);
     const { sunrise } = getSunTimes(today, latitude, longitude);
     
-    // If sunrise has already passed today, schedule for tomorrow
-    if (sunrise < new Date()) {
+    // Add a 1 minute buffer to ensure notification is in the future
+    const bufferMs = 60 * 1000; // 1 minute
+    let notificationDate = sunrise;
+    
+    // If sunrise has already passed today (or is too close), schedule for tomorrow
+    if (sunrise.getTime() < now.getTime() + bufferMs) {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       const { sunrise: tomorrowSunrise } = getSunTimes(tomorrow, latitude, longitude);
-      
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: '🌅 Good Morning!',
-          body: 'Time to log your habits for today. Start your day right!',
-          data: { screen: 'DailyLog' },
-          sound: true,
-        },
-        trigger: {
-          date: tomorrowSunrise,
-          channelId: 'habit-reminders',
-        },
-      });
-      
-      return id;
+      notificationDate = tomorrowSunrise;
+    }
+    
+    // Double-check that the notification date is in the future
+    if (notificationDate.getTime() < now.getTime() + bufferMs) {
+      // If still in the past, add one more day
+      notificationDate = new Date(notificationDate);
+      notificationDate.setDate(notificationDate.getDate() + 1);
     }
     
     const id = await Notifications.scheduleNotificationAsync({
@@ -93,11 +91,12 @@ export async function scheduleSunriseReminder(
         sound: true,
       },
       trigger: {
-        date: sunrise,
+        date: notificationDate,
         channelId: 'habit-reminders',
       },
     });
     
+    console.log(`[Notifications] Scheduled sunrise reminder for ${notificationDate.toISOString()}`);
     return id;
   } catch (error) {
     console.error('Error scheduling sunrise reminder:', error);
@@ -116,29 +115,27 @@ export async function scheduleSunsetReminder(
     const enabled = await loadNotificationsEnabled();
     if (!enabled) return null;
 
-    const today = new Date();
+    const now = new Date();
+    const today = new Date(now);
     const { sunset } = getSunTimes(today, latitude, longitude);
     
-    // If sunset has already passed today, schedule for tomorrow
-    if (sunset < new Date()) {
+    // Add a 1 minute buffer to ensure notification is in the future
+    const bufferMs = 60 * 1000; // 1 minute
+    let notificationDate = sunset;
+    
+    // If sunset has already passed today (or is too close), schedule for tomorrow
+    if (sunset.getTime() < now.getTime() + bufferMs) {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       const { sunset: tomorrowSunset } = getSunTimes(tomorrow, latitude, longitude);
-      
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: '🌇 Good Evening!',
-          body: "Don't forget to review today's habits before bed!",
-          data: { screen: 'DailyLog' },
-          sound: true,
-        },
-        trigger: {
-          date: tomorrowSunset,
-          channelId: 'habit-reminders',
-        },
-      });
-      
-      return id;
+      notificationDate = tomorrowSunset;
+    }
+    
+    // Double-check that the notification date is in the future
+    if (notificationDate.getTime() < now.getTime() + bufferMs) {
+      // If still in the past, add one more day
+      notificationDate = new Date(notificationDate);
+      notificationDate.setDate(notificationDate.getDate() + 1);
     }
     
     const id = await Notifications.scheduleNotificationAsync({
@@ -149,11 +146,12 @@ export async function scheduleSunsetReminder(
         sound: true,
       },
       trigger: {
-        date: sunset,
+        date: notificationDate,
         channelId: 'habit-reminders',
       },
     });
     
+    console.log(`[Notifications] Scheduled sunset reminder for ${notificationDate.toISOString()}`);
     return id;
   } catch (error) {
     console.error('Error scheduling sunset reminder:', error);
@@ -173,14 +171,27 @@ export async function scheduleDailyReminders(): Promise<void> {
       return;
     }
     
-    // Cancel existing notifications
+    console.log(`[Notifications] Scheduling reminders for location: ${location.latitude}, ${location.longitude}`);
+    
+    // Cancel existing notifications first
     await Notifications.cancelAllScheduledNotificationsAsync();
+    console.log('[Notifications] Cancelled all existing notifications');
     
-    // Schedule new ones
-    await scheduleSunriseReminder(location.latitude, location.longitude);
-    await scheduleSunsetReminder(location.latitude, location.longitude);
+    // Schedule new ones sequentially to avoid race conditions
+    const sunriseId = await scheduleSunriseReminder(location.latitude, location.longitude);
+    const sunsetId = await scheduleSunsetReminder(location.latitude, location.longitude);
     
-    console.log('Daily reminders scheduled successfully');
+    console.log(`[Notifications] Daily reminders scheduled successfully. Sunrise ID: ${sunriseId}, Sunset ID: ${sunsetId}`);
+    
+    // Log all scheduled notifications for debugging
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    console.log(`[Notifications] Total scheduled notifications: ${scheduled.length}`);
+    scheduled.forEach((notif, index) => {
+      const trigger = notif.trigger as any;
+      if (trigger?.date) {
+        console.log(`[Notifications] Notification ${index + 1}: ${notif.content.title} at ${new Date(trigger.date).toISOString()}`);
+      }
+    });
   } catch (error) {
     console.error('Error scheduling daily reminders:', error);
   }
