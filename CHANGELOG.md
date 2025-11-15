@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.3...v1.0.4) (2025-11-15)
+
+
+### 🐛 Bug Fixes
+
+* resolves ipa package discovery error ([70bb366](https://github.com/cayubweeums-repos/smart_habit/commit/70bb366ff6e9529efccbf03437d2079068d13b2c))
+
 ## [1.0.3](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.2...v1.0.3) (2025-11-15)
 
 
