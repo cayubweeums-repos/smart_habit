@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/cayubweeums-repos/smart_habit/compare/v1.1.0...v1.1.1) (2025-11-16)
+
+
+### 🐛 Bug Fixes
+
+* moves openweather api key to secrets post testing ([d863f76](https://github.com/cayubweeums-repos/smart_habit/commit/d863f761354f63f2bc3cc9f7398696290fe8885f))
+
 ## [1.1.0](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.6...v1.1.0) (2025-11-16)
 
 
