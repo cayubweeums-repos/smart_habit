@@ -1,9 +1,15 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 import { WeatherData, OneCallWeatherData, TemperatureUnit } from '../types';
 
 // Note: One Call API 3.0 requires paid subscription
-const OPENWEATHER_API_KEY = 'c36bb96f19cd98b9f4f0e2d8c7259138';
+// Get API key from Expo Constants (set via environment variable)
+const OPENWEATHER_API_KEY = Constants.expoConfig?.extra?.openWeatherApiKey || '';
 const ONECALL_BASE_URL = 'https://api.openweathermap.org/data/3.0/onecall';
+
+if (!OPENWEATHER_API_KEY) {
+  console.warn('[WeatherService] OPENWEATHER_API_KEY is not set. Weather features will not work.');
+}
 
 /**
  * Fetch comprehensive weather data using One Call API 3.0
