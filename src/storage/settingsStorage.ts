@@ -39,7 +39,12 @@ export const saveNotificationsEnabled = async (enabled: boolean): Promise<void> 
 export const loadNotificationsEnabled = async (): Promise<boolean> => {
   try {
     const enabledJson = await AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
-    return enabledJson ? JSON.parse(enabledJson) : true; // default to enabled
+    if (!enabledJson) {
+      return true; // default to enabled
+    }
+    const enabled = JSON.parse(enabledJson);
+    // Normalize boolean - handle cases where it might be stored as a string
+    return enabled === true || enabled === 'true';
   } catch (error) {
     console.error('Error loading notifications enabled:', error);
     return true;

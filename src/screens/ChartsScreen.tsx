@@ -9,6 +9,7 @@ import {
   Modal,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LineChart } from 'react-native-chart-kit';
 import { colors, spacing, borderRadius, fontSize, fontWeight, commonStyles } from '../theme';
 import { Habit, HabitStats } from '../types';
@@ -18,6 +19,7 @@ import { getLastNDaysRange, formatShortDate, parseDateKey } from '../utils';
 const screenWidth = Dimensions.get('window').width;
 
 export default function ChartsScreen() {
+  const insets = useSafeAreaInsets();
   const [habits, setHabits] = useState<Habit[]>([]);
   const [selectedHabitIds, setSelectedHabitIds] = useState<string[]>([]);
   const [allStats, setAllStats] = useState<{ [habitId: string]: HabitStats }>({});
@@ -71,43 +73,44 @@ export default function ChartsScreen() {
       allEntriesMap[habitId] = entries;
     }
     
-    // Create date labels
+    // Create date labels and calculate completion percentages in a single loop
     const dates: string[] = [];
+    const completionPercentages: number[] = [];
     let currentDate = parseDateKey(startDate);
     const end = parseDateKey(endDate);
     
     while (currentDate <= end) {
       const dateKey = currentDate.toISOString().split('T')[0];
+      
+      // Add date label
       dates.push(formatShortDate(dateKey));
+      
+      // Count how many habits were completed on this day
+      let completedCount = 0;
+      for (const habitId of habitIdsToShow) {
+        const entries = allEntriesMap[habitId];
+        const entry = entries.find(e => e.date === dateKey);
+        if (entry?.completed) {
+          completedCount++;
+        }
+      }
+      
+      // Calculate percentage (0 to 100)
+      const percentage = habitIdsToShow.length > 0 
+        ? (completedCount / habitIdsToShow.length) * 100
+        : 0;
+      completionPercentages.push(percentage);
+      
       currentDate.setDate(currentDate.getDate() + 1);
     }
     
-    // Create datasets for each selected habit
-    const datasets = habitIdsToShow.map(habitId => {
-      const habit = habitsToShow.find(h => h.id === habitId);
-      const entries = allEntriesMap[habitId];
-      
-      const values: number[] = [];
-      let currentDate = parseDateKey(startDate);
-      const end = parseDateKey(endDate);
-      
-      while (currentDate <= end) {
-        const dateKey = currentDate.toISOString().split('T')[0];
-        const entry = entries.find(e => e.date === dateKey);
-        values.push(entry?.completed ? 1 : 0);
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-      
-      return {
-        data: values,
-        color: (opacity = 1) => habit?.color || colors.greenLight,
-        strokeWidth: 2,
-      };
-    });
-    
     setChartData({
       labels: dates.filter((_, i) => i % Math.ceil(days / 7) === 0), // Show ~7 labels
-      datasets,
+      datasets: [{
+        data: completionPercentages,
+        color: (opacity = 1) => colors.greenLight,
+        strokeWidth: 2,
+      }],
     });
   };
 
@@ -140,8 +143,11 @@ export default function ChartsScreen() {
   };
 
   return (
-    <View style={commonStyles.container}>
-      <ScrollView style={styles.scrollView}>
+    <View style={[commonStyles.container, { paddingTop: insets.top }]}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.md }}
+      >
         <View style={styles.header}>
           <Text style={commonStyles.title}>Progress</Text>
           <TouchableOpacity
@@ -185,7 +191,7 @@ export default function ChartsScreen() {
             </View>
 
             {/* Chart */}
-            {chartData && chartData.datasets[0].data.length > 0 && (
+            {chartData && chartData.datasets && chartData.datasets[0] && chartData.datasets[0].data.length > 0 && (
               <View style={styles.chartContainer}>
                 <Text style={styles.chartTitle}>Completion Trend</Text>
                 <LineChart
@@ -206,12 +212,23 @@ export default function ChartsScreen() {
                       r: '3',
                       strokeWidth: '2',
                     },
+                    formatYLabel: (value) => {
+                      // Format y-axis labels as percentages
+                      // Data is already in percentage format (0-100), just add the % sign
+                      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+                      if (isNaN(numValue) || numValue < 0) return '0%';
+                      // Round to nearest integer for cleaner labels
+                      return `${Math.round(numValue)}%`;
+                    },
                   }}
                   bezier
                   style={styles.chart}
                   withVerticalLines={false}
                   withHorizontalLines={true}
-                  segments={1}
+                  segments={4}
+                  yAxisLabel=""
+                  yAxisSuffix=""
+                  fromZero={true}
                 />
               </View>
             )}
@@ -229,9 +246,6 @@ export default function ChartsScreen() {
                     return (
                       <View key={habit.id} style={styles.habitStatSection}>
                         <View style={styles.habitStatHeader}>
-                          <View
-                            style={[styles.habitStatDot, { backgroundColor: habit.color }]}
-                          />
                           <Text style={styles.habitStatName}>{habit.name}</Text>
                         </View>
                         <View style={styles.habitStatGrid}>
@@ -265,7 +279,7 @@ export default function ChartsScreen() {
 
       {/* Selection Modal */}
       <Modal
-        visible={selectionModalVisible}
+        visible={!!selectionModalVisible}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setSelectionModalVisible(false)}
@@ -306,9 +320,6 @@ export default function ChartsScreen() {
                       <Text style={styles.checkmark}>✓</Text>
                     )}
                   </View>
-                  <View
-                    style={[styles.habitColorIndicator, { backgroundColor: habit.color }]}
-                  />
                   <Text style={styles.habitCheckboxName}>{habit.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -438,12 +449,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  habitStatDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: spacing.sm,
-  },
   habitStatName: {
     color: colors.white,
     fontSize: fontSize.lg,
@@ -541,12 +546,6 @@ const styles = StyleSheet.create({
     color: colors.greenLight,
     fontSize: fontSize.lg,
     fontWeight: fontWeight.bold,
-  },
-  habitColorIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: spacing.md,
   },
   habitCheckboxName: {
     flex: 1,

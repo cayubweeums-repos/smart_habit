@@ -115,22 +115,32 @@ export function getWeatherIconUrl(iconCode: string): string {
 }
 
 /**
- * Get weather emoji based on condition
+ * Get weather icon name based on condition
+ * Returns an object with library and icon name for @expo/vector-icons
  */
-export function getWeatherEmoji(condition: string): string {
-  const emojiMap: { [key: string]: string } = {
-    Clear: '☀️',
-    Clouds: '☁️',
-    Rain: '🌧️',
-    Drizzle: '🌦️',
-    Thunderstorm: '⛈️',
-    Snow: '❄️',
-    Mist: '🌫️',
-    Fog: '🌫️',
-    Haze: '🌫️',
+export function getWeatherIcon(condition: string): { library: 'Ionicons' | 'MaterialIcons' | 'FontAwesome5'; name: string } {
+  const iconMap: { [key: string]: { library: 'Ionicons' | 'MaterialIcons' | 'FontAwesome5'; name: string } } = {
+    Clear: { library: 'Ionicons', name: 'sunny' },
+    Clouds: { library: 'Ionicons', name: 'cloud' },
+    Rain: { library: 'Ionicons', name: 'rainy' },
+    Drizzle: { library: 'Ionicons', name: 'rainy-outline' },
+    Thunderstorm: { library: 'Ionicons', name: 'thunderstorm' },
+    Snow: { library: 'Ionicons', name: 'snow' },
+    Mist: { library: 'MaterialIcons', name: 'foggy' },
+    Fog: { library: 'MaterialIcons', name: 'foggy' },
+    Haze: { library: 'MaterialIcons', name: 'foggy' },
   };
   
-  return emojiMap[condition] || '🌤️';
+  return iconMap[condition] || { library: 'Ionicons', name: 'partly-sunny' };
+}
+
+/**
+ * @deprecated Use getWeatherIcon instead
+ * Kept for backward compatibility
+ */
+export function getWeatherEmoji(condition: string): string {
+  // Return empty string since we're replacing with icons
+  return '';
 }
 
 /**
@@ -156,40 +166,50 @@ export function formatDate(timestamp: number): string {
 }
 
 /**
- * Get alert severity emoji
+ * Get alert severity icon based on event type
+ * Returns an object with library and icon name for @expo/vector-icons
  */
-export function getAlertSeverityEmoji(event: string): string {
+export function getAlertSeverityIcon(event: string): { library: 'Ionicons' | 'MaterialIcons' | 'FontAwesome5'; name: string } {
   const lowerEvent = event.toLowerCase();
   
   if (lowerEvent.includes('tornado') || lowerEvent.includes('hurricane')) {
-    return '🌪️';
+    return { library: 'Ionicons', name: 'tornado' };
   }
   if (lowerEvent.includes('flood')) {
-    return '🌊';
+    return { library: 'Ionicons', name: 'water' };
   }
   if (lowerEvent.includes('fire')) {
-    return '🔥';
+    return { library: 'Ionicons', name: 'flame' };
   }
   if (lowerEvent.includes('heat')) {
-    return '🌡️';
+    return { library: 'Ionicons', name: 'thermometer' };
   }
   if (lowerEvent.includes('cold') || lowerEvent.includes('freeze')) {
-    return '❄️';
+    return { library: 'Ionicons', name: 'snow' };
   }
   if (lowerEvent.includes('wind')) {
-    return '💨';
+    return { library: 'Ionicons', name: 'wind' };
   }
   if (lowerEvent.includes('snow') || lowerEvent.includes('blizzard')) {
-    return '❄️';
+    return { library: 'Ionicons', name: 'snow' };
   }
   if (lowerEvent.includes('thunderstorm')) {
-    return '⛈️';
+    return { library: 'Ionicons', name: 'thunderstorm' };
   }
   if (lowerEvent.includes('fog')) {
-    return '🌫️';
+    return { library: 'MaterialIcons', name: 'foggy' };
   }
   
-  return '⚠️';
+  return { library: 'Ionicons', name: 'warning' };
+}
+
+/**
+ * @deprecated Use getAlertSeverityIcon instead
+ * Kept for backward compatibility
+ */
+export function getAlertSeverityEmoji(event: string): string {
+  // Return empty string since we're replacing with icons
+  return '';
 }
 
 /**

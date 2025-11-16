@@ -1,12 +1,19 @@
 import React from 'react';
-import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { colors, fontSize } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { colors, fontSize, spacing } from '../theme';
 import { HabitsScreen, DailyLogScreen, ChartsScreen, SettingsScreen } from '../screens';
 
 const Tab = createBottomTabNavigator();
 
 export default function MainNavigator() {
+  const insets = useSafeAreaInsets();
+  
+  // Calculate tab bar height: base height for icon + text + padding, plus safe area
+  const baseHeight = 70; // Increased to accommodate icon (24px) + text (~16px) + padding
+  const totalHeight = baseHeight + insets.bottom;
+  
   return (
     <Tab.Navigator
       screenOptions={{
@@ -14,15 +21,20 @@ export default function MainNavigator() {
           backgroundColor: colors.grey,
           borderTopColor: colors.greyLight,
           borderTopWidth: 1,
-          paddingTop: 8,
-          paddingBottom: 8,
-          height: 60,
+          paddingTop: spacing.sm,
+          paddingBottom: Math.max(insets.bottom, spacing.sm),
+          height: totalHeight,
         },
         tabBarActiveTintColor: colors.greenLight,
         tabBarInactiveTintColor: colors.greyMedium,
         tabBarLabelStyle: {
           fontSize: fontSize.sm,
           fontWeight: '600',
+          marginTop: 2,
+          marginBottom: 0,
+        },
+        tabBarItemStyle: {
+          paddingVertical: spacing.xs,
         },
         headerStyle: {
           backgroundColor: colors.greyDark,
@@ -42,7 +54,7 @@ export default function MainNavigator() {
         options={{
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <TabIcon icon="📝" color={color} />
+            <Ionicons name="document-text-outline" size={size || 24} color={color} />
           ),
         }}
       />
@@ -52,7 +64,7 @@ export default function MainNavigator() {
         options={{
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <TabIcon icon="✓" color={color} />
+            <Ionicons name="checkmark-circle-outline" size={size || 24} color={color} />
           ),
         }}
       />
@@ -62,7 +74,7 @@ export default function MainNavigator() {
         options={{
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <TabIcon icon="📊" color={color} />
+            <Ionicons name="bar-chart-outline" size={size || 24} color={color} />
           ),
         }}
       />
@@ -72,20 +84,11 @@ export default function MainNavigator() {
         options={{
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <TabIcon icon="⚙️" color={color} />
+            <Ionicons name="settings-outline" size={size || 24} color={color} />
           ),
         }}
       />
     </Tab.Navigator>
-  );
-}
-
-// Simple icon component using emoji
-function TabIcon({ icon, color }: { icon: string; color: string }) {
-  return (
-    <Text style={{ fontSize: 24, opacity: color === colors.greyMedium ? 0.5 : 1 }}>
-      {icon}
-    </Text>
   );
 }
 

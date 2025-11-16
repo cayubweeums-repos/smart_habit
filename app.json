@@ -55,6 +55,12 @@
         {
           "locationAlwaysAndWhenInUsePermission": "This app needs your location to calculate sunrise and sunset times for habit reminders."
         }
+      ],
+      [
+        "expo-background-fetch",
+        {
+          "mode": "fetch"
+        }
       ]
     ],
     "extra": {
