@@ -1,4 +1,9 @@
 import { registerRootComponent } from 'expo';
+import 'expo-task-manager';
+
+// Import background task module to ensure task is defined before app starts
+// This must be imported before App to ensure TaskManager.defineTask executes
+import './src/services/backgroundWeatherTask';
 
 import App from './App';
 

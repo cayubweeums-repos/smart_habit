@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
 import { colors, spacing, borderRadius, fontSize, fontWeight, commonStyles } from '../theme';
@@ -38,14 +39,15 @@ import {
 import {
   fetchWeatherByCoordinates,
   fetchOneCallWeather,
-  getWeatherEmoji,
+  getWeatherIcon,
   formatTime,
   formatDate,
-  getAlertSeverityEmoji,
+  getAlertSeverityIcon,
   formatTemperature,
   geocodeCityName,
   formatDistance,
 } from '../services/weatherService';
+import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import {
   isGarminAuthenticated,
   mockGarminLogin,
@@ -60,6 +62,7 @@ import {
 import { getTodayKey } from '../utils';
 
 export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
   const [location, setLocation] = useState<LocationSettings | null>(null);
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [oneCallWeather, setOneCallWeather] = useState<OneCallWeatherData | null>(null);
@@ -88,7 +91,8 @@ export default function SettingsScreen() {
     setLocation(savedLocation);
 
     const notifEnabled = await loadNotificationsEnabled();
-    setNotificationsEnabled(notifEnabled);
+    // Ensure it's always a boolean
+    setNotificationsEnabled(notifEnabled === true || notifEnabled === 'true');
 
     const units = await loadWeatherUnits();
     setWeatherUnits(units);
@@ -452,8 +456,11 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={commonStyles.container}>
-      <ScrollView style={styles.scrollView}>
+    <View style={[commonStyles.container, { paddingTop: insets.top }]}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.md }}
+      >
         <View style={styles.header}>
           <Text style={commonStyles.title}>Settings</Text>
         </View>
@@ -570,10 +577,13 @@ export default function SettingsScreen() {
           {/* Weather Alerts */}
           {oneCallWeather?.alerts && oneCallWeather.alerts.length > 0 && (
             <View style={styles.alertCard}>
-              {oneCallWeather.alerts.slice(0, 2).map((alert, index) => (
+              {oneCallWeather.alerts.slice(0, 2).map((alert, index) => {
+                const alertIcon = getAlertSeverityIcon(alert.event);
+                const IconComponent = alertIcon.library === 'Ionicons' ? Ionicons : alertIcon.library === 'MaterialIcons' ? MaterialIcons : FontAwesome5;
+                return (
                 <View key={index} style={styles.alertItem}>
                   <View style={styles.alertHeader}>
-                    <Text style={styles.alertEmoji}>{getAlertSeverityEmoji(alert.event)}</Text>
+                    <IconComponent name={alertIcon.name as any} size={24} color={colors.warning} />
                     <Text style={styles.alertTitle}>{alert.event}</Text>
                   </View>
                   <Text style={styles.alertSource}>{alert.sender_name}</Text>
@@ -584,7 +594,8 @@ export default function SettingsScreen() {
                     {alert.description}
                   </Text>
                 </View>
-              ))}
+                );
+              })}
               {oneCallWeather.alerts.length > 2 && (
                 <Text style={styles.moreAlertsText}>
                   +{oneCallWeather.alerts.length - 2} more alert(s)
@@ -597,7 +608,11 @@ export default function SettingsScreen() {
             <>
               <View style={styles.card}>
                 <View style={styles.weatherHeader}>
-                  <Text style={styles.weatherEmoji}>{getWeatherEmoji(weather.condition)}</Text>
+                  {(() => {
+                    const weatherIcon = getWeatherIcon(weather.condition);
+                    const IconComponent = weatherIcon.library === 'Ionicons' ? Ionicons : weatherIcon.library === 'MaterialIcons' ? MaterialIcons : FontAwesome5;
+                    return <IconComponent name={weatherIcon.name as any} size={48} color={colors.greenLight} />;
+                  })()}
                   <View style={styles.weatherInfo}>
                     <Text style={styles.weatherTemp}>
                       {formatTemperature(weather.temperature, weatherUnits.temperature)}
@@ -639,11 +654,17 @@ export default function SettingsScreen() {
                 {sunTimes && (
                   <View style={styles.sunTimesContainer}>
                     <View style={styles.sunTime}>
-                      <Text style={styles.sunTimeLabel}>🌅 Sunrise</Text>
+                      <View style={styles.sunTimeLabelContainer}>
+                        <Ionicons name="sunny" size={20} color={colors.greenLight} />
+                        <Text style={styles.sunTimeLabel}>Sunrise</Text>
+                      </View>
                       <Text style={styles.sunTimeValue}>{sunTimes.sunrise}</Text>
                     </View>
                     <View style={styles.sunTime}>
-                      <Text style={styles.sunTimeLabel}>🌇 Sunset</Text>
+                      <View style={styles.sunTimeLabelContainer}>
+                        <Ionicons name="moon" size={20} color={colors.greenLight} />
+                        <Text style={styles.sunTimeLabel}>Sunset</Text>
+                      </View>
                       <Text style={styles.sunTimeValue}>{sunTimes.sunset}</Text>
                     </View>
                   </View>
@@ -691,16 +712,22 @@ export default function SettingsScreen() {
                     <View style={styles.divider} />
                     <View style={styles.healthDataRow}>
                       <Text style={styles.healthDataLabel}>Steps Today</Text>
-                      <Text style={styles.healthDataValue}>
-                        🚶 {garminData.steps.toLocaleString()}
-                      </Text>
+                      <View style={styles.healthDataValueContainer}>
+                        <Ionicons name="footsteps" size={16} color={colors.greenLight} style={styles.healthDataIcon} />
+                        <Text style={styles.healthDataValue}>
+                          {garminData.steps.toLocaleString()}
+                        </Text>
+                      </View>
                     </View>
                     {garminData.distance && (
                       <View style={styles.healthDataRow}>
                         <Text style={styles.healthDataLabel}>Distance</Text>
-                        <Text style={styles.healthDataValue}>
-                          📍 {formatDistance(garminData.distance / 1000, weatherUnits.distance)}
-                        </Text>
+                        <View style={styles.healthDataValueContainer}>
+                          <Ionicons name="location" size={16} color={colors.greenLight} style={styles.healthDataIcon} />
+                          <Text style={styles.healthDataValue}>
+                            {formatDistance(garminData.distance / 1000, weatherUnits.distance)}
+                          </Text>
+                        </View>
                       </View>
                     )}
                     {garminData.calories && (
@@ -751,7 +778,7 @@ export default function SettingsScreen() {
                 </Text>
               </View>
               <Switch
-                value={notificationsEnabled}
+                value={!!notificationsEnabled}
                 onValueChange={handleNotificationToggle}
                 trackColor={{ false: colors.greyLight, true: colors.green }}
                 thumbColor={colors.white}
@@ -763,7 +790,7 @@ export default function SettingsScreen() {
 
       {/* Location Modal */}
       <Modal
-        visible={locationModalVisible}
+        visible={!!locationModalVisible}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setLocationModalVisible(false)}
@@ -785,7 +812,10 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
               ) : (
-                <Text style={commonStyles.buttonText}>📍 Use Current Location</Text>
+                <View style={styles.buttonContent}>
+                  <Ionicons name="location" size={20} color={colors.white} style={styles.buttonIcon} />
+                  <Text style={commonStyles.buttonText}>Use Current Location</Text>
+                </View>
               )}
             </TouchableOpacity>
 
@@ -793,9 +823,12 @@ export default function SettingsScreen() {
 
             <Text style={styles.inputLabel}>Or enter city manually:</Text>
             <View style={styles.tipCard}>
-              <Text style={styles.tipText}>
-                💡 Tip: For best results, include state/country (e.g., "Rogers, Arkansas" or "Portland, Oregon")
-              </Text>
+              <View style={styles.tipContent}>
+                <Ionicons name="information-circle" size={16} color={colors.greenLight} style={styles.tipIcon} />
+                <Text style={styles.tipText}>
+                  Tip: For best results, include state/country (e.g., "Rogers, Arkansas" or "Portland, Oregon")
+                </Text>
+              </View>
             </View>
             <TextInput
               style={commonStyles.input}
@@ -841,7 +874,7 @@ export default function SettingsScreen() {
 
       {/* Forecast Modal */}
       <Modal
-        visible={forecastModalVisible}
+        visible={!!forecastModalVisible}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setForecastModalVisible(false)}
@@ -851,7 +884,7 @@ export default function SettingsScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>8-Day Forecast</Text>
               <TouchableOpacity onPress={() => setForecastModalVisible(false)}>
-                <Text style={styles.closeButton}>✕</Text>
+                <Ionicons name="close" size={24} color={colors.white} />
               </TouchableOpacity>
             </View>
 
@@ -862,9 +895,11 @@ export default function SettingsScreen() {
                     <Text style={styles.forecastDayName}>
                       {index === 0 ? 'Today' : formatDate(day.dt)}
                     </Text>
-                    <Text style={styles.forecastDayEmoji}>
-                      {getWeatherEmoji(day.weather[0].main)}
-                    </Text>
+                    {(() => {
+                      const weatherIcon = getWeatherIcon(day.weather[0].main);
+                      const IconComponent = weatherIcon.library === 'Ionicons' ? Ionicons : weatherIcon.library === 'MaterialIcons' ? MaterialIcons : FontAwesome5;
+                      return <IconComponent name={weatherIcon.name as any} size={32} color={colors.greenLight} />;
+                    })()}
                   </View>
                   <Text style={styles.forecastDayCondition}>
                     {day.weather[0].description}
@@ -996,8 +1031,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  weatherEmoji: {
-    fontSize: 48,
+  weatherIcon: {
     marginRight: spacing.md,
   },
   weatherInfo: {
@@ -1027,10 +1061,15 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
   },
+  sunTimeLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
   sunTimeLabel: {
     color: colors.greyVeryLight,
     fontSize: fontSize.sm,
-    marginBottom: spacing.xs,
   },
   sunTimeValue: {
     color: colors.white,
@@ -1045,6 +1084,14 @@ const styles = StyleSheet.create({
   healthDataLabel: {
     color: colors.greyVeryLight,
     fontSize: fontSize.md,
+  },
+  healthDataValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  healthDataIcon: {
+    marginRight: spacing.xs,
   },
   healthDataValue: {
     color: colors.white,
@@ -1116,10 +1163,28 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: colors.purpleLight,
   },
+  tipContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+  },
+  tipIcon: {
+    marginTop: 2,
+  },
   tipText: {
     color: colors.greyVeryLight,
     fontSize: fontSize.sm,
     lineHeight: 20,
+    flex: 1,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  buttonIcon: {
+    marginRight: spacing.xs,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1163,8 +1228,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xs,
   },
-  alertEmoji: {
-    fontSize: 24,
+  alertIcon: {
     marginRight: spacing.sm,
   },
   alertTitle: {
@@ -1258,8 +1322,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     fontWeight: fontWeight.semibold,
   },
-  forecastDayEmoji: {
-    fontSize: 32,
+  forecastDayIcon: {
+    // Icon size is set inline
   },
   forecastDayCondition: {
     color: colors.greyVeryLight,

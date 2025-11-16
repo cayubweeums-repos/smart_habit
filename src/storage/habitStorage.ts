@@ -17,7 +17,19 @@ export const saveHabits = async (habits: Habit[]): Promise<void> => {
 export const loadHabits = async (): Promise<Habit[]> => {
   try {
     const habitsJson = await AsyncStorage.getItem(HABITS_KEY);
-    return habitsJson ? JSON.parse(habitsJson) : [];
+    if (!habitsJson) {
+      return [];
+    }
+    
+    const habits = JSON.parse(habitsJson);
+    
+    // Normalize boolean values - ensure weatherDependent and archived are always booleans
+    // This handles cases where they might have been stored as strings
+    return habits.map((habit: any) => ({
+      ...habit,
+      archived: habit.archived === true || habit.archived === 'true',
+      weatherDependent: habit.weatherDependent === true || habit.weatherDependent === 'true' ? true : undefined,
+    }));
   } catch (error) {
     console.error('Error loading habits:', error);
     return [];
@@ -73,7 +85,33 @@ export const saveDailyLogs = async (logs: DailyLog[]): Promise<void> => {
 export const loadDailyLogs = async (): Promise<DailyLog[]> => {
   try {
     const logsJson = await AsyncStorage.getItem(DAILY_LOGS_KEY);
-    return logsJson ? JSON.parse(logsJson) : [];
+    if (!logsJson) {
+      return [];
+    }
+    
+    const logs = JSON.parse(logsJson);
+    
+    // Normalize boolean values in entries - ensure completed is always a boolean
+    // This handles cases where it might have been stored as a string
+    return logs.map((log: any) => ({
+      ...log,
+      entries: log.entries?.map((entry: any) => {
+        let completed = entry.completed;
+        // Normalize to boolean: handle string 'true'/'false' or actual boolean
+        if (completed === true || completed === 'true') {
+          completed = true;
+        } else if (completed === false || completed === 'false') {
+          completed = false;
+        } else {
+          // For null, undefined, or other values, default to false
+          completed = false;
+        }
+        return {
+          ...entry,
+          completed,
+        };
+      }) || [],
+    }));
   } catch (error) {
     console.error('Error loading daily logs:', error);
     return [];
@@ -112,7 +150,8 @@ export const updateHabitEntry = async (
   date: string,
   habitId: string,
   completed: boolean,
-  note?: string
+  note?: string,
+  quantity?: number
 ): Promise<void> => {
   try {
     const logs = await loadDailyLogs();
@@ -132,6 +171,7 @@ export const updateHabitEntry = async (
       date,
       completed,
       note,
+      quantity,
     };
     
     if (entryIndex !== -1) {

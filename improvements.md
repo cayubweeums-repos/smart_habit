@@ -1,14 +1,7 @@
 # General
-- [ ] No more emojis
-- [ ] Padding on top and bottom to avoid the top status bar on IOS and Android that shows battery and what not
-- [ ] Notifications should simply remind the user to, for the morning, log what happened the day before and tapping it takes them to the day befores habits, and for the evening, should remind the user to log what happened today and tapping takes them to the default today habit page
+
 
 # Habit
-- [ ] Remove color association for habits
-- [ ] Add habit types
-    - [ ] Weather dependent
-    - [ ] Quantity 
-        - Tracking how
 - [ ] Add 'preset' habits
     - Morning Caffeine
     - Evening Caffeine

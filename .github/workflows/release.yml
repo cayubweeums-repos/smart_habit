@@ -122,8 +122,9 @@ jobs:
           grep -q "org.gradle.caching" gradle.properties || echo "org.gradle.caching=true" >> gradle.properties
           # Optimize JVM - use more memory and enable GC optimizations
           grep -q "org.gradle.jvmargs" gradle.properties || echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:MaxGCPauseMillis=200" >> gradle.properties
-          # Enable configuration cache for faster configuration phase
-          grep -q "org.gradle.configuration-cache" gradle.properties || echo "org.gradle.configuration-cache=true" >> gradle.properties
+          # Configuration cache disabled - React Native/Expo build scripts require Node.js during configuration
+          # which is incompatible with configuration cache
+          # grep -q "org.gradle.configuration-cache" gradle.properties || echo "org.gradle.configuration-cache=true" >> gradle.properties
           # Enable file system watching for faster incremental builds
           grep -q "org.gradle.vfs.watch" gradle.properties || echo "org.gradle.vfs.watch=true" >> gradle.properties
 
@@ -136,7 +137,6 @@ jobs:
             --build-cache \
             --parallel \
             --no-daemon \
-            --configuration-cache \
             --warn
 
       - name: Rename and move APK
