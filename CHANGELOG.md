@@ -5,6 +5,18 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.6...v1.1.0) (2025-11-16)
+
+
+### ✨ Features
+
+* adds habit types, weather dependence, and better day selection ([f930fb6](https://github.com/cayubweeums-repos/smart_habit/commit/f930fb68d13c55619eb90e18fad60684f2828b52))
+
+
+### 🐛 Bug Fixes
+
+* removes md files that aren't needed, improves notification service ([fbd4173](https://github.com/cayubweeums-repos/smart_habit/commit/fbd4173205d6c7e11f3c8a7772b3547aa65c86c2))
+
 ## [1.0.6](https://github.com/cayubweeums-repos/smart_habit/compare/v1.0.5...v1.0.6) (2025-11-15)
 
 
