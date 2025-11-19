@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/cayubweeums-repos/smart_habit/compare/v1.1.1...v1.2.0) (2025-11-19)
+
+
+### ✨ Features
+
+* improves charts, habits, settings, and workflows ([45dab15](https://github.com/cayubweeums-repos/smart_habit/commit/45dab158d5051a2a6f1aef7a4edd910ba568095b))
+
 ## [1.1.1](https://github.com/cayubweeums-repos/smart_habit/compare/v1.1.0...v1.1.1) (2025-11-16)
 
 
