@@ -20,11 +20,13 @@ export interface LocationSettings {
 export type TemperatureUnit = 'celsius' | 'fahrenheit';
 export type PrecipitationUnit = 'mm' | 'inches';
 export type DistanceUnit = 'kilometers' | 'miles';
+export type WeightUnit = 'kg' | 'lbs';
 
 export interface WeatherUnits {
   temperature: TemperatureUnit;
   precipitation: PrecipitationUnit;
   distance: DistanceUnit;
+  weight: WeightUnit;
 }
 
 // One Call API 3.0 Types

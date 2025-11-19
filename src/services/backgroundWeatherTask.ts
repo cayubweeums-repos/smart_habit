@@ -1,4 +1,4 @@
-import * as BackgroundFetch from 'expo-background-fetch';
+import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { checkWeatherDependentHabits } from './notificationService';
 
@@ -14,10 +14,10 @@ try {
       console.log('[BackgroundTask] Running background weather check...');
       await checkWeatherDependentHabits(false);
       console.log('[BackgroundTask] Background weather check completed');
-      return BackgroundFetch.BackgroundFetchResult.NewData;
+      return BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
       console.error('[BackgroundTask] Error in background weather check:', error);
-      return BackgroundFetch.BackgroundFetchResult.Failed;
+      return BackgroundTask.BackgroundTaskResult.Failed;
     }
   });
   console.log('[BackgroundTask] Task defined successfully:', BACKGROUND_WEATHER_TASK);
@@ -32,22 +32,17 @@ try {
 export async function registerBackgroundWeatherTask(): Promise<boolean> {
   try {
     // Check current status to see if background fetch is available
-    let status: BackgroundFetch.BackgroundFetchStatus | null = null;
+    let status: BackgroundTask.BackgroundTaskStatus | null = null;
     try {
-      status = await BackgroundFetch.getStatusAsync();
-      console.log('[BackgroundTask] Background fetch status:', status);
+      status = await BackgroundTask.getStatusAsync();
+      console.log('[BackgroundTask] Background task status:', status);
     } catch (error) {
-      console.warn('[BackgroundTask] Could not get background fetch status:', error);
+      console.warn('[BackgroundTask] Could not get background task status:', error);
       // If we can't get status, try to register anyway - it will fail gracefully if not available
     }
 
-    if (status === BackgroundFetch.BackgroundFetchStatus.Restricted) {
-      console.warn('[BackgroundTask] Background fetch is restricted');
-      return false;
-    }
-
-    if (status === BackgroundFetch.BackgroundFetchStatus.Denied) {
-      console.warn('[BackgroundTask] Background fetch is denied');
+    if (status === BackgroundTask.BackgroundTaskStatus.Restricted) {
+      console.warn('[BackgroundTask] Background task execution is restricted');
       return false;
     }
 
@@ -55,10 +50,8 @@ export async function registerBackgroundWeatherTask(): Promise<boolean> {
     // Note: The task must be defined before this is called (via TaskManager.defineTask above)
     // The task definition happens when this module is imported, which should be before
     // registerBackgroundWeatherTask is called
-    await BackgroundFetch.registerTaskAsync(BACKGROUND_WEATHER_TASK, {
-      minimumInterval: 2 * 60 * 60, // 2 hours in seconds
-      stopOnTerminate: false, // Continue running even if app is terminated
-      startOnBoot: true, // Start when device boots
+    await BackgroundTask.registerTaskAsync(BACKGROUND_WEATHER_TASK, {
+      minimumInterval: 120, // 2 hours in minutes
     });
 
     console.log('[BackgroundTask] Background weather task registered successfully');
@@ -82,7 +75,7 @@ export async function unregisterBackgroundWeatherTask(): Promise<void> {
   try {
     const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_WEATHER_TASK);
     if (isRegistered) {
-      await BackgroundFetch.unregisterTaskAsync(BACKGROUND_WEATHER_TASK);
+      await BackgroundTask.unregisterTaskAsync(BACKGROUND_WEATHER_TASK);
       console.log('[BackgroundTask] Background weather task unregistered');
     }
   } catch (error) {

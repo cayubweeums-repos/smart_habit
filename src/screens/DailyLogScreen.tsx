@@ -14,12 +14,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius, fontSize, fontWeight, commonStyles } from '../theme';
-import { Habit, HabitEntry, WeatherData } from '../types';
+import { Habit, HabitEntry, WeatherData, HabitCategory } from '../types';
 import { loadHabits, getDailyLog, updateHabitEntry, loadDailyLogs } from '../storage';
 import { getTodayKey, formatDisplayDate, getDayOfWeek, parseDateKey, formatDateKey, isToday, weatherMatches } from '../utils';
 import { fetchWeatherByCoordinates } from '../services/weatherService';
 import { loadLocationSettings } from '../storage/settingsStorage';
 import { checkWeatherDependentHabits } from '../services/notificationService';
+import { checkAutomaticHabits, isAutomaticHabit } from '../services/automaticHabitService';
+import { CATEGORY_DISPLAY_NAMES, CATEGORY_ORDER } from '../utils/prebuiltHabits';
 
 export default function DailyLogScreen() {
   const insets = useSafeAreaInsets();
@@ -34,10 +36,15 @@ export default function DailyLogScreen() {
   const [tempSelectedDate, setTempSelectedDate] = useState<Date>(new Date());
   const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
   const [calendarMonthData, setCalendarMonthData] = useState<{ [dateKey: string]: 'green' | 'red' | 'grey' }>({});
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<HabitCategory | 'uncategorized'>>(new Set());
+  const previouslyCompletedRef = React.useRef<Set<HabitCategory | 'uncategorized'>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // Reset collapsed categories tracking when date changes
+      setCollapsedCategories(new Set());
+      previouslyCompletedRef.current = new Set();
     }, [selectedDateKey])
   );
 
@@ -45,6 +52,9 @@ export default function DailyLogScreen() {
     const loadedHabits = await loadHabits();
     const activeHabits = loadedHabits.filter(h => !h.archived);
     setHabits(activeHabits);
+
+    // Check automatic habits (e.g., step target from Garmin)
+    await checkAutomaticHabits(selectedDateKey, activeHabits);
 
     // Load weather if viewing today's date
     if (isToday(selectedDateKey)) {
@@ -327,48 +337,81 @@ export default function DailyLogScreen() {
     const status = entries[item.id];
     const quantity = quantities[item.id];
     const isQuantityType = item.type === 'quantity';
+    const isAutomatic = isAutomaticHabit(item);
     
     return (
       <View style={styles.habitRow}>
         <View style={styles.habitInfo}>
-          <Text style={styles.habitName}>{item.name}</Text>
+          <View style={styles.habitNameRow}>
+            <Text style={styles.habitName}>{item.name}</Text>
+            {isAutomatic && (
+              <View style={styles.automaticBadge}>
+                <Text style={styles.automaticBadgeText}>Auto</Text>
+              </View>
+            )}
+          </View>
           {isQuantityType && status === true && quantity !== undefined && (
             <Text style={styles.quantityText}>Quantity: {quantity}</Text>
           )}
+          {isAutomatic && (
+            <Text style={styles.automaticNote}>
+              Synced from Garmin
+            </Text>
+          )}
         </View>
         <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[
-              styles.statusButton,
-              status === true && styles.statusButtonCompleted,
-            ]}
-            onPress={() => handleHabitToggle(item.id, true)}
-          >
-            <Text
-              style={[
-                styles.statusButtonText,
-                status === true && styles.statusButtonTextActive,
-              ]}
-            >
-              ✓
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.statusButton,
-              status === false && styles.statusButtonIncomplete,
-            ]}
-            onPress={() => handleHabitToggle(item.id, false)}
-          >
-            <Text
-              style={[
-                styles.statusButtonText,
-                status === false && styles.statusButtonTextActive,
-              ]}
-            >
-              ✗
-            </Text>
-          </TouchableOpacity>
+          {isAutomatic ? (
+            // Read-only display for automatic habits
+            <View style={[
+              styles.automaticStatusIndicator,
+              status === true && styles.automaticStatusComplete,
+              status === false && styles.automaticStatusIncomplete,
+            ]}>
+              <Text style={[
+                styles.automaticStatusText,
+                status === true && styles.automaticStatusTextComplete,
+                status === false && styles.automaticStatusTextIncomplete,
+              ]}>
+                {status === true ? '✓' : status === false ? '✗' : '—'}
+              </Text>
+            </View>
+          ) : (
+            // Normal interactive buttons
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.statusButton,
+                  status === true && styles.statusButtonCompleted,
+                ]}
+                onPress={() => handleHabitToggle(item.id, true)}
+              >
+                <Text
+                  style={[
+                    styles.statusButtonText,
+                    status === true && styles.statusButtonTextActive,
+                  ]}
+                >
+                  ✓
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.statusButton,
+                  status === false && styles.statusButtonIncomplete,
+                ]}
+                onPress={() => handleHabitToggle(item.id, false)}
+              >
+                <Text
+                  style={[
+                    styles.statusButtonText,
+                    status === false && styles.statusButtonTextActive,
+                  ]}
+                >
+                  ✗
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
     );
@@ -386,6 +429,78 @@ export default function DailyLogScreen() {
     }
     return true; // Include this habit
   });
+
+  // Group habits by category
+  const groupedHabits = React.useMemo(() => {
+    const groups: Record<string, Habit[]> = {};
+    
+    // Initialize all categories
+    CATEGORY_ORDER.forEach(cat => {
+      groups[cat] = [];
+    });
+    groups['uncategorized'] = [];
+    
+    // Group habits
+    visibleHabits.forEach(habit => {
+      if (habit.category && groups[habit.category]) {
+        groups[habit.category].push(habit);
+      } else {
+        groups['uncategorized'].push(habit);
+      }
+    });
+    
+    return groups;
+  }, [visibleHabits]);
+
+  // Check if a category is fully logged
+  const isCategoryFullyLogged = (categoryHabits: Habit[]) => {
+    if (categoryHabits.length === 0) return false;
+    return categoryHabits.every(habit => entries[habit.id] !== null && entries[habit.id] !== undefined);
+  };
+
+  // Auto-collapse newly completed categories (but allow manual expansion)
+  React.useEffect(() => {
+    const nowCompleted = new Set<HabitCategory | 'uncategorized'>();
+
+    (Object.keys(groupedHabits) as (HabitCategory | 'uncategorized')[]).forEach(category => {
+      const categoryHabits = groupedHabits[category];
+      if (isCategoryFullyLogged(categoryHabits)) {
+        nowCompleted.add(category);
+      }
+    });
+
+    // Find newly completed categories (completed now but weren't before)
+    const newlyCompleted: (HabitCategory | 'uncategorized')[] = [];
+    nowCompleted.forEach(category => {
+      if (!previouslyCompletedRef.current.has(category)) {
+        newlyCompleted.push(category);
+      }
+    });
+
+    // Auto-collapse only newly completed categories
+    if (newlyCompleted.length > 0) {
+      setCollapsedCategories(prev => {
+        const next = new Set(prev);
+        newlyCompleted.forEach(category => next.add(category));
+        return next;
+      });
+    }
+
+    // Update the previouslyCompleted ref
+    previouslyCompletedRef.current = nowCompleted;
+  }, [entries, groupedHabits]);
+
+  const toggleCategory = (category: HabitCategory | 'uncategorized') => {
+    setCollapsedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+  };
 
   const loggedCount = visibleHabits.filter(habit => entries[habit.id] !== null).length;
   const totalCount = visibleHabits.length;
@@ -447,12 +562,70 @@ export default function DailyLogScreen() {
             <Text style={styles.sectionTitle}>
               {isToday(selectedDateKey) ? "Today's Habits" : "Habits"}
             </Text>
-            <FlatList
-              data={visibleHabits}
-              renderItem={renderHabit}
-              keyExtractor={item => item.id}
-              scrollEnabled={false}
-            />
+            
+            {/* Render categorized habits */}
+            {CATEGORY_ORDER.map(category => {
+              const categoryHabits = groupedHabits[category];
+              if (categoryHabits.length === 0) return null;
+              
+              const isCollapsed = collapsedCategories.has(category);
+              const isFullyLogged = isCategoryFullyLogged(categoryHabits);
+              
+              return (
+                <View key={category} style={styles.categorySection}>
+                  <TouchableOpacity 
+                    style={styles.categoryHeader}
+                    onPress={() => toggleCategory(category)}
+                  >
+                    <Text style={[
+                      styles.categoryTitle,
+                      isFullyLogged && styles.categoryTitleCompleted
+                    ]}>
+                      {CATEGORY_DISPLAY_NAMES[category]}
+                    </Text>
+                    <Ionicons 
+                      name={isCollapsed ? 'chevron-down' : 'chevron-up'} 
+                      size={20} 
+                      color={colors.greyMedium} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {!isCollapsed && categoryHabits.map(habit => (
+                    <View key={habit.id}>
+                      {renderHabit({ item: habit })}
+                    </View>
+                  ))}
+                </View>
+              );
+            })}
+            
+            {/* Render uncategorized habits */}
+            {groupedHabits['uncategorized'].length > 0 && (
+              <View style={styles.categorySection}>
+                <TouchableOpacity 
+                  style={styles.categoryHeader}
+                  onPress={() => toggleCategory('uncategorized')}
+                >
+                  <Text style={[
+                    styles.categoryTitle,
+                    isCategoryFullyLogged(groupedHabits['uncategorized']) && styles.categoryTitleCompleted
+                  ]}>
+                    Other
+                  </Text>
+                  <Ionicons 
+                    name={collapsedCategories.has('uncategorized') ? 'chevron-down' : 'chevron-up'} 
+                    size={20} 
+                    color={colors.greyMedium} 
+                  />
+                </TouchableOpacity>
+                
+                {!collapsedCategories.has('uncategorized') && groupedHabits['uncategorized'].map(habit => (
+                  <View key={habit.id}>
+                    {renderHabit({ item: habit })}
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -1006,6 +1179,74 @@ const styles = StyleSheet.create({
   },
   calendarDayDotGrey: {
     backgroundColor: colors.greyMedium,
+  },
+  categorySection: {
+    marginBottom: spacing.lg,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  categoryTitle: {
+    color: colors.greyMedium,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  categoryTitleCompleted: {
+    color: colors.greenLight,
+  },
+  automaticBadge: {
+    backgroundColor: colors.purpleLight,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    marginLeft: spacing.sm,
+  },
+  automaticBadgeText: {
+    color: colors.white,
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+  },
+  automaticNote: {
+    color: colors.greyMedium,
+    fontSize: fontSize.sm,
+    marginTop: spacing.xs,
+    fontStyle: 'italic',
+  },
+  automaticStatusIndicator: {
+    width: 60,
+    height: 40,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.greyLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.greyMedium,
+  },
+  automaticStatusComplete: {
+    backgroundColor: colors.green + '20',
+    borderColor: colors.green,
+  },
+  automaticStatusIncomplete: {
+    backgroundColor: colors.error + '20',
+    borderColor: colors.error,
+  },
+  automaticStatusText: {
+    fontSize: fontSize.xl,
+    color: colors.greyMedium,
+    fontWeight: fontWeight.bold,
+  },
+  automaticStatusTextComplete: {
+    color: colors.green,
+  },
+  automaticStatusTextIncomplete: {
+    color: colors.error,
   },
 });
 

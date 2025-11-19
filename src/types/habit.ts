@@ -1,4 +1,8 @@
-export type HabitType = 'quantity';
+export type HabitType = 'quantity' | 'automatic';
+
+export type HabitCategory = 'morning' | 'health' | 'bedtime';
+
+export type AutomaticHabitType = 'stepTarget';
 
 // OpenWeather API main weather condition types
 export type WeatherConditionType = 
@@ -16,6 +20,8 @@ export interface Habit {
   id: string;
   name: string;
   type?: HabitType; // undefined for legacy habits (defaults to simple yes/no)
+  automaticType?: AutomaticHabitType; // For automatic habits, specifies what type of automation
+  category?: HabitCategory; // Category for organizing habits
   createdAt: string; // ISO date string
   archived: boolean;
   weatherDependent?: boolean; // If true, habit requires specific weather conditions

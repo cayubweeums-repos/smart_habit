@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { getSunTimes, weatherMatches } from '../utils';
-import { loadLocationSettings, loadNotificationsEnabled } from '../storage';
+import { loadLocationSettings, loadNotificationsEnabled, loadNotificationTimes, type NotificationTimes } from '../storage';
 import { loadHabits } from '../storage/habitStorage';
 import { fetchWeatherByCoordinates } from './weatherService';
 
@@ -100,7 +100,8 @@ export async function requestNotificationPermissions(): Promise<boolean> {
  */
 export async function scheduleSunriseReminder(
   latitude: number,
-  longitude: number
+  longitude: number,
+  customTime?: { hour: number; minute: number }
 ): Promise<string | null> {
   try {
     const enabled = await loadNotificationsEnabled();
@@ -115,20 +116,30 @@ export async function scheduleSunriseReminder(
 
     const now = new Date();
     
-    // CRITICAL FIX: Calculate tomorrow's sunrise explicitly to avoid Android interpreting it as today
-    // Android may fire notifications immediately if it thinks the time has passed today
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0); // Start of tomorrow
-    
-    const { sunrise: tomorrowSunrise } = getSunTimes(tomorrow, latitude, longitude);
-    let notificationDate = new Date(tomorrowSunrise);
+    // Use custom time if provided, otherwise use actual sunrise
+    let notificationDate: Date;
+    if (customTime) {
+      // Use custom time for tomorrow
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(customTime.hour, customTime.minute, 0, 0);
+      notificationDate = tomorrow;
+    } else {
+      // CRITICAL FIX: Calculate tomorrow's sunrise explicitly to avoid Android interpreting it as today
+      // Android may fire notifications immediately if it thinks the time has passed today
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0); // Start of tomorrow
+      
+      const { sunrise: tomorrowSunrise } = getSunTimes(tomorrow, latitude, longitude);
+      notificationDate = new Date(tomorrowSunrise);
+    }
     
     // Ensure the notification is at least 24 hours in the future
     // This prevents Android from thinking it's "today's time" and firing immediately
     const minFutureTime = now.getTime() + (24 * 60 * 60 * 1000); // 24 hours from now
     
-    if (notificationDate.getTime() <= minFutureTime) {
+    if (!customTime && notificationDate.getTime() <= minFutureTime) {
       // If tomorrow's sunrise is less than 24 hours away, schedule for day after tomorrow
       const dayAfterTomorrow = new Date(now);
       dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
@@ -314,7 +325,8 @@ export async function scheduleSunriseReminder(
  */
 export async function scheduleSunsetReminder(
   latitude: number,
-  longitude: number
+  longitude: number,
+  customTime?: { hour: number; minute: number }
 ): Promise<string | null> {
   try {
     const enabled = await loadNotificationsEnabled();
@@ -329,20 +341,30 @@ export async function scheduleSunsetReminder(
 
     const now = new Date();
     
-    // CRITICAL FIX: Calculate tomorrow's sunset explicitly to avoid Android interpreting it as today
-    // Android may fire notifications immediately if it thinks the time has passed today
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0); // Start of tomorrow
-    
-    const { sunset: tomorrowSunset } = getSunTimes(tomorrow, latitude, longitude);
-    let notificationDate = new Date(tomorrowSunset);
+    // Use custom time if provided, otherwise use actual sunset
+    let notificationDate: Date;
+    if (customTime) {
+      // Use custom time for tomorrow
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(customTime.hour, customTime.minute, 0, 0);
+      notificationDate = tomorrow;
+    } else {
+      // CRITICAL FIX: Calculate tomorrow's sunset explicitly to avoid Android interpreting it as today
+      // Android may fire notifications immediately if it thinks the time has passed today
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0); // Start of tomorrow
+      
+      const { sunset: tomorrowSunset } = getSunTimes(tomorrow, latitude, longitude);
+      notificationDate = new Date(tomorrowSunset);
+    }
     
     // Ensure the notification is at least 24 hours in the future
     // This prevents Android from thinking it's "today's time" and firing immediately
     const minFutureTime = now.getTime() + (24 * 60 * 60 * 1000); // 24 hours from now
     
-    if (notificationDate.getTime() <= minFutureTime) {
+    if (!customTime && notificationDate.getTime() <= minFutureTime) {
       // If tomorrow's sunset is less than 24 hours away, schedule for day after tomorrow
       const dayAfterTomorrow = new Date(now);
       dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
@@ -537,6 +559,9 @@ export async function scheduleDailyReminders(): Promise<void> {
     
     console.log(`[Notifications] Scheduling reminders for location: ${location.latitude}, ${location.longitude}`);
     
+    // Load custom notification times if set
+    const notificationTimes = await loadNotificationTimes();
+    
     // Check if we're in Expo Go (which has notification limitations)
     try {
       const isExpoGo = Constants.executionEnvironment === Constants.ExecutionEnvironment.StoreClient;
@@ -567,7 +592,8 @@ export async function scheduleDailyReminders(): Promise<void> {
     lastScheduledTime = Date.now();
     
     // Schedule new ones sequentially to avoid race conditions
-    const sunriseId = await scheduleSunriseReminder(location.latitude, location.longitude);
+    const sunriseTime = notificationTimes ? { hour: notificationTimes.sunriseHour, minute: notificationTimes.sunriseMinute } : undefined;
+    const sunriseId = await scheduleSunriseReminder(location.latitude, location.longitude, sunriseTime);
     
     // Longer delay between scheduling to avoid conflicts
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -575,7 +601,8 @@ export async function scheduleDailyReminders(): Promise<void> {
     // Update scheduling time for second notification
     lastScheduledTime = Date.now();
     
-    const sunsetId = await scheduleSunsetReminder(location.latitude, location.longitude);
+    const sunsetTime = notificationTimes ? { hour: notificationTimes.sunsetHour, minute: notificationTimes.sunsetMinute } : undefined;
+    const sunsetId = await scheduleSunsetReminder(location.latitude, location.longitude, sunsetTime);
     
     // Schedule periodic weather checks
     await schedulePeriodicWeatherChecks();

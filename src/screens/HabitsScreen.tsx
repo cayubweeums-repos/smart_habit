@@ -14,18 +14,22 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, fontSize, fontWeight, commonStyles } from '../theme';
-import { Habit, HabitType, WeatherConditionType } from '../types';
+import { Habit, HabitType, HabitCategory, WeatherConditionType } from '../types';
 import { loadHabits, addHabit, updateHabit, deleteHabit } from '../storage';
 import { getAllWeatherTypes, getWeatherTypeDisplayName } from '../utils/weatherUtils';
+import { PREBUILT_HABITS, PrebuiltHabit, CATEGORY_DISPLAY_NAMES } from '../utils/prebuiltHabits';
 
 export default function HabitsScreen() {
   const insets = useSafeAreaInsets();
   const [habits, setHabits] = useState<Habit[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [prebuiltHabitsModalVisible, setPrebuiltHabitsModalVisible] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [habitName, setHabitName] = useState('');
   const [habitType, setHabitType] = useState<HabitType | undefined>(undefined);
+  const [habitCategory, setHabitCategory] = useState<HabitCategory | undefined>(undefined);
   const [typeDropdownVisible, setTypeDropdownVisible] = useState(false);
+  const [categoryDropdownVisible, setCategoryDropdownVisible] = useState(false);
   const [weatherDependent, setWeatherDependent] = useState(false);
   const [selectedWeatherTypes, setSelectedWeatherTypes] = useState<WeatherConditionType[]>([]);
   const [weatherTypesDropdownVisible, setWeatherTypesDropdownVisible] = useState(false);
@@ -43,10 +47,19 @@ export default function HabitsScreen() {
   };
 
   const openAddModal = () => {
+    // Show prebuilt habits modal first
+    setPrebuiltHabitsModalVisible(true);
+  };
+
+  const openCustomHabitModal = () => {
+    // Close prebuilt habits modal and open custom habit form
+    setPrebuiltHabitsModalVisible(false);
     setEditingHabit(null);
     setHabitName('');
     setHabitType(undefined);
+    setHabitCategory(undefined);
     setTypeDropdownVisible(false);
+    setCategoryDropdownVisible(false);
     setWeatherDependent(false);
     setSelectedWeatherTypes([]);
     setWeatherTypesDropdownVisible(false);
@@ -54,11 +67,32 @@ export default function HabitsScreen() {
     setModalVisible(true);
   };
 
+  const handleSelectPrebuiltHabit = async (prebuiltHabit: PrebuiltHabit) => {
+    try {
+      const newHabit: Habit = {
+        id: Date.now().toString(),
+        name: prebuiltHabit.name,
+        type: prebuiltHabit.type,
+        automaticType: prebuiltHabit.automaticType,
+        category: prebuiltHabit.category,
+        createdAt: new Date().toISOString(),
+        archived: false,
+      };
+      await addHabit(newHabit);
+      setPrebuiltHabitsModalVisible(false);
+      loadHabitsData();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add habit');
+    }
+  };
+
   const openEditModal = (habit: Habit) => {
     setEditingHabit(habit);
     setHabitName(habit.name);
     setHabitType(habit.type);
+    setHabitCategory(habit.category);
     setTypeDropdownVisible(false);
+    setCategoryDropdownVisible(false);
     // Ensure weatherDependent is always a boolean
     setWeatherDependent(!!habit.weatherDependent);
     setSelectedWeatherTypes(habit.requiredWeatherTypes || []);
@@ -84,6 +118,7 @@ export default function HabitsScreen() {
         await updateHabit(editingHabit.id, {
           name: habitName.trim(),
           type: habitType,
+          category: habitCategory,
           weatherDependent: weatherDependent || undefined,
           requiredWeatherTypes: weatherDependent && selectedWeatherTypes.length > 0 ? selectedWeatherTypes : undefined,
           backupHabitName: weatherDependent && backupHabitName.trim() ? backupHabitName.trim() : undefined,
@@ -94,6 +129,7 @@ export default function HabitsScreen() {
           id: Date.now().toString(),
           name: habitName.trim(),
           type: habitType,
+          category: habitCategory,
           createdAt: new Date().toISOString(),
           archived: false,
           weatherDependent: weatherDependent || undefined,
@@ -105,6 +141,7 @@ export default function HabitsScreen() {
 
       setModalVisible(false);
       setTypeDropdownVisible(false);
+      setCategoryDropdownVisible(false);
       setWeatherTypesDropdownVisible(false);
       loadHabitsData();
     } catch (error) {
@@ -123,6 +160,11 @@ export default function HabitsScreen() {
   };
 
   const availableBackupHabits = habits.filter(h => !editingHabit || h.id !== editingHabit.id);
+
+  // Filter out prebuilt habits that are already being tracked
+  const availablePrebuiltHabits = PREBUILT_HABITS.filter(
+    prebuilt => !habits.some(habit => habit.name === prebuilt.name)
+  );
 
   const handleDeleteHabit = (habit: Habit) => {
     Alert.alert(
@@ -191,6 +233,7 @@ export default function HabitsScreen() {
         onRequestClose={() => {
           setModalVisible(false);
           setTypeDropdownVisible(false);
+          setCategoryDropdownVisible(false);
           setWeatherTypesDropdownVisible(false);
         }}
       >
@@ -223,6 +266,21 @@ export default function HabitsScreen() {
                 >
                   <Text style={styles.inputText}>
                     {habitType === 'quantity' ? 'Quantity' : 'Yes/No'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View>
+                <Text style={styles.inputLabel}>Category (Optional)</Text>
+                <TouchableOpacity
+                  style={commonStyles.input}
+                  onPress={() => setCategoryDropdownVisible(true)}
+                >
+                  <Text style={[
+                    styles.inputText,
+                    !habitCategory && { color: colors.greyMedium }
+                  ]}>
+                    {habitCategory ? CATEGORY_DISPLAY_NAMES[habitCategory] : 'None'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -275,6 +333,89 @@ export default function HabitsScreen() {
                           habitType === 'quantity' && styles.selectionOptionTextSelected,
                         ]}>
                           Quantity
+                        </Text>
+                      </TouchableOpacity>
+                    </ScrollView>
+                  </View>
+                </View>
+              </Modal>
+
+              {/* Habit Category Selection Modal */}
+              <Modal
+                visible={categoryDropdownVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setCategoryDropdownVisible(false)}
+              >
+                <View style={styles.selectionModalOverlay}>
+                  <View style={styles.selectionModalContent}>
+                    <View style={styles.selectionModalHeader}>
+                      <Text style={styles.selectionModalTitle}>Select Category</Text>
+                      <TouchableOpacity
+                        onPress={() => setCategoryDropdownVisible(false)}
+                        style={styles.selectionModalCloseButton}
+                      >
+                        <Text style={styles.selectionModalCloseText}>Done</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <ScrollView 
+                      style={styles.selectionModalScrollView}
+                      contentContainerStyle={styles.selectionModalScrollContent}
+                    >
+                      <TouchableOpacity
+                        style={styles.selectionOption}
+                        onPress={() => {
+                          setHabitCategory(undefined);
+                          setCategoryDropdownVisible(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.selectionOptionText,
+                          habitCategory === undefined && styles.selectionOptionTextSelected,
+                        ]}>
+                          None
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.selectionOption}
+                        onPress={() => {
+                          setHabitCategory('morning');
+                          setCategoryDropdownVisible(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.selectionOptionText,
+                          habitCategory === 'morning' && styles.selectionOptionTextSelected,
+                        ]}>
+                          {CATEGORY_DISPLAY_NAMES.morning}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.selectionOption}
+                        onPress={() => {
+                          setHabitCategory('health');
+                          setCategoryDropdownVisible(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.selectionOptionText,
+                          habitCategory === 'health' && styles.selectionOptionTextSelected,
+                        ]}>
+                          {CATEGORY_DISPLAY_NAMES.health}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.selectionOption}
+                        onPress={() => {
+                          setHabitCategory('bedtime');
+                          setCategoryDropdownVisible(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.selectionOptionText,
+                          habitCategory === 'bedtime' && styles.selectionOptionTextSelected,
+                        ]}>
+                          {CATEGORY_DISPLAY_NAMES.bedtime}
                         </Text>
                       </TouchableOpacity>
                     </ScrollView>
@@ -392,6 +533,7 @@ export default function HabitsScreen() {
                   onPress={() => {
                     setModalVisible(false);
                     setTypeDropdownVisible(false);
+                    setCategoryDropdownVisible(false);
                     setWeatherTypesDropdownVisible(false);
                   }}
                 >
@@ -406,6 +548,81 @@ export default function HabitsScreen() {
               </View>
             </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Prebuilt Habits Selection Modal */}
+      <Modal
+        visible={prebuiltHabitsModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setPrebuiltHabitsModalVisible(false)}
+      >
+        <View style={styles.prebuiltModalOverlay}>
+          <View style={styles.prebuiltModalContainer}>
+            <View style={styles.prebuiltModalHeader}>
+              <Text style={styles.modalTitle}>Add Habit</Text>
+              <TouchableOpacity
+                onPress={() => setPrebuiltHabitsModalVisible(false)}
+                style={styles.prebuiltModalCloseButton}
+              >
+                <Text style={styles.prebuiltModalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView 
+              style={styles.prebuiltModalScrollView}
+              contentContainerStyle={styles.prebuiltModalScrollContent}
+            >
+              {availablePrebuiltHabits.length > 0 ? (
+                <>
+                  <Text style={styles.prebuiltSectionTitle}>Prebuilt Habits</Text>
+                  <Text style={styles.prebuiltSectionSubtitle}>
+                    Choose from our curated list of habits
+                  </Text>
+
+                  {availablePrebuiltHabits.map((prebuiltHabit, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.prebuiltHabitCard}
+                      onPress={() => handleSelectPrebuiltHabit(prebuiltHabit)}
+                    >
+                      <View style={styles.prebuiltHabitContent}>
+                        <Text style={styles.prebuiltHabitName}>{prebuiltHabit.name}</Text>
+                        <Text style={styles.prebuiltHabitType}>
+                          {prebuiltHabit.type === 'quantity' 
+                            ? 'Quantity' 
+                            : prebuiltHabit.type === 'automatic' 
+                            ? 'Automatic (Garmin)' 
+                            : 'Yes/No'}
+                        </Text>
+                      </View>
+                      <Text style={styles.habitArrow}>›</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              ) : (
+                <View style={styles.noPrebuiltHabitsContainer}>
+                  <Text style={styles.noPrebuiltHabitsText}>
+                    You're already tracking all prebuilt habits!
+                  </Text>
+                  <Text style={styles.noPrebuiltHabitsSubtext}>
+                    Create a custom habit below
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.customHabitSection}>
+                <Text style={styles.prebuiltSectionTitle}>Custom Habit</Text>
+                <TouchableOpacity
+                  style={styles.customHabitButton}
+                  onPress={openCustomHabitModal}
+                >
+                  <Text style={styles.customHabitButtonText}>+ Create Custom Habit</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
         </View>
       </Modal>
     </View>
@@ -682,6 +899,111 @@ const styles = StyleSheet.create({
   selectionOptionTextSelected: {
     color: colors.white,
     fontWeight: fontWeight.semibold,
+  },
+  prebuiltModalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  prebuiltModalContainer: {
+    backgroundColor: colors.grey,
+    borderRadius: borderRadius.lg,
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '85%',
+    minHeight: 400,
+  },
+  prebuiltModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.greyLight,
+  },
+  prebuiltModalCloseButton: {
+    padding: spacing.sm,
+  },
+  prebuiltModalCloseText: {
+    color: colors.greyVeryLight,
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.bold,
+  },
+  prebuiltModalScrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  prebuiltModalScrollContent: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  prebuiltSectionTitle: {
+    color: colors.white,
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    marginBottom: spacing.xs,
+  },
+  prebuiltSectionSubtitle: {
+    color: colors.greyMedium,
+    fontSize: fontSize.sm,
+    marginBottom: spacing.md,
+  },
+  prebuiltHabitCard: {
+    backgroundColor: colors.greyLight,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  prebuiltHabitContent: {
+    flex: 1,
+  },
+  prebuiltHabitName: {
+    color: colors.white,
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  prebuiltHabitType: {
+    color: colors.greyMedium,
+    fontSize: fontSize.sm,
+  },
+  customHabitSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.greyLight,
+  },
+  customHabitButton: {
+    backgroundColor: colors.green,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+  },
+  customHabitButtonText: {
+    color: colors.white,
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+  },
+  noPrebuiltHabitsContainer: {
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+  },
+  noPrebuiltHabitsText: {
+    color: colors.white,
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.semibold,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  noPrebuiltHabitsSubtext: {
+    color: colors.greyMedium,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
   },
 });
 

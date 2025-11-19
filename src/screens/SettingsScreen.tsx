@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   TemperatureUnit,
   PrecipitationUnit,
   DistanceUnit,
+  WeightUnit,
 } from '../types';
 import {
   loadLocationSettings,
@@ -35,6 +36,13 @@ import {
   saveNotificationsEnabled,
   loadWeatherUnits,
   saveWeatherUnits,
+  saveGarminCredentials,
+  loadGarminCredentials,
+  clearGarminCredentials,
+  saveNotificationTimes,
+  loadNotificationTimes,
+  type GarminCredentials,
+  type NotificationTimes,
 } from '../storage/settingsStorage';
 import {
   fetchWeatherByCoordinates,
@@ -50,9 +58,10 @@ import {
 import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import {
   isGarminAuthenticated,
-  mockGarminLogin,
+  signInWithGarmin,
   logoutGarmin,
   fetchGarminHealthData,
+  syncGarminHealthData,
 } from '../services/garminService';
 import {
   requestNotificationPermissions,
@@ -77,14 +86,68 @@ export default function SettingsScreen() {
     temperature: 'fahrenheit',
     precipitation: 'inches',
     distance: 'miles',
+    weight: 'lbs',
   });
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [garminEmail, setGarminEmail] = useState('');
+  const [garminPassword, setGarminPassword] = useState('');
+  const [garminMfaCode, setGarminMfaCode] = useState('');
+  const [garminError, setGarminError] = useState<string | null>(null);
+  const [isGarminConnecting, setIsGarminConnecting] = useState(false);
+  const [isGarminSyncing, setIsGarminSyncing] = useState(false);
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [notificationTimes, setNotificationTimes] = useState<NotificationTimes>({
+    sunriseHour: 6,
+    sunriseMinute: 0,
+    sunsetHour: 18,
+    sunsetMinute: 0,
+  });
 
+  // Load settings on mount and when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadSettings();
+      
+      return () => {
+        // Clean up interval when screen loses focus
+        stopPeriodicSync();
+      };
     }, [])
   );
+
+  // Set up periodic sync when authenticated status changes
+  useEffect(() => {
+    if (garminAuthenticated) {
+      // Sync immediately on authentication
+      syncGarminData();
+      // Start periodic sync
+      startPeriodicSync();
+    } else {
+      // Stop periodic sync if not authenticated
+      stopPeriodicSync();
+    }
+    
+    return () => {
+      // Clean up on unmount
+      stopPeriodicSync();
+    };
+  }, [garminAuthenticated, syncGarminData, startPeriodicSync, stopPeriodicSync]);
+
+  const stopPeriodicSync = useCallback(() => {
+    if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+  }, []);
+
+  const startPeriodicSync = useCallback(() => {
+    stopPeriodicSync(); // Clear any existing interval
+    
+    // Sync every 1 minute (60000 ms)
+    syncIntervalRef.current = setInterval(() => {
+      syncGarminData();
+    }, 60000);
+  }, [syncGarminData, stopPeriodicSync]);
 
   const loadSettings = async () => {
     const savedLocation = await loadLocationSettings();
@@ -97,7 +160,47 @@ export default function SettingsScreen() {
     const units = await loadWeatherUnits();
     setWeatherUnits(units);
 
-    const garminAuth = await isGarminAuthenticated();
+    const savedNotificationTimes = await loadNotificationTimes();
+    if (savedNotificationTimes) {
+      setNotificationTimes(savedNotificationTimes);
+    }
+
+    // Load saved Garmin credentials
+    const savedCredentials = await loadGarminCredentials();
+    if (savedCredentials) {
+      setGarminEmail(savedCredentials.email);
+      // Don't auto-fill password for security, but keep email
+    }
+
+    setGarminError(null);
+    let garminAuth = await isGarminAuthenticated();
+    
+    // Only attempt auto-login if not already authenticated and credentials are saved
+    // Skip auto-login if we just authenticated (to avoid duplicate attempts)
+    if (!garminAuth && savedCredentials && savedCredentials.password) {
+      try {
+        console.log('[SettingsScreen] Attempting auto-login with saved credentials...');
+        await signInWithGarmin({
+          email: savedCredentials.email,
+          password: savedCredentials.password,
+        });
+        // Ensure credentials are saved (in case they weren't before)
+        await saveGarminCredentials(savedCredentials);
+        garminAuth = true;
+        console.log('[SettingsScreen] Auto-login successful');
+      } catch (error: any) {
+        // Auto-login failed - could be rate limiting, invalid credentials, or network issue
+        const isRateLimited = error?.message?.includes('429') || error?.message?.includes('rate limit') || error?.message?.includes('already in progress');
+        if (isRateLimited) {
+          console.log('[SettingsScreen] Auto-login skipped due to rate limiting or concurrent attempt');
+        } else {
+          console.log('[SettingsScreen] Auto-login failed:', error?.message);
+        }
+        // Don't show error to user - they can manually reconnect if needed
+        // Keep credentials saved in case it was a temporary network issue
+      }
+    }
+    
     setGarminAuthenticated(garminAuth);
 
     if (savedLocation) {
@@ -105,7 +208,9 @@ export default function SettingsScreen() {
     }
 
     if (garminAuth) {
+      // Load from cache immediately, then sync in background
       loadGarminData();
+      // Sync will happen in useEffect when garminAuthenticated changes
     }
   };
 
@@ -143,9 +248,30 @@ export default function SettingsScreen() {
   };
 
   const loadGarminData = async () => {
-    const data = await fetchGarminHealthData(getTodayKey());
+    // Load from cache first (fast, works offline)
+    const data = await fetchGarminHealthData(getTodayKey(), false);
     setGarminData(data);
   };
+
+  const syncGarminData = useCallback(async () => {
+    // Sync from API (force refresh)
+    setIsGarminSyncing(true);
+    try {
+      const data = await syncGarminHealthData();
+      setGarminData(data);
+    } catch (error: any) {
+      console.error('[SettingsScreen] Error syncing Garmin data:', {
+        message: error?.message,
+        stack: error?.stack,
+        error: error,
+      });
+      // On error, still try to load from cache
+      const cached = await fetchGarminHealthData(getTodayKey(), false);
+      setGarminData(cached);
+    } finally {
+      setIsGarminSyncing(false);
+    }
+  }, []);
 
   const handleTemperatureUnitChange = async (unit: TemperatureUnit) => {
     const newUnits = { ...weatherUnits, temperature: unit };
@@ -166,6 +292,12 @@ export default function SettingsScreen() {
 
   const handleDistanceUnitChange = async (unit: DistanceUnit) => {
     const newUnits = { ...weatherUnits, distance: unit };
+    setWeatherUnits(newUnits);
+    await saveWeatherUnits(newUnits);
+  };
+
+  const handleWeightUnitChange = async (unit: WeightUnit) => {
+    const newUnits = { ...weatherUnits, weight: unit };
     setWeatherUnits(newUnits);
     await saveWeatherUnits(newUnits);
   };
@@ -349,7 +481,7 @@ export default function SettingsScreen() {
         console.error('[Location] City not found');
         Alert.alert(
           'City Not Found', 
-          `Could not find "${cityInput}". Please try:\n\n• Adding the state/country (e.g., "Rogers, Arkansas")\n• Using a major city nearby\n• Checking spelling`
+          `Could not find "${cityInput}". Please try:\n\n• Adding the state/country (e.g., "New York, New York")\n• Using a major city nearby\n• Checking spelling`
         );
         setIsLoadingLocation(false);
         return;
@@ -418,7 +550,7 @@ export default function SettingsScreen() {
       const granted = await requestNotificationPermissions();
       if (granted && location) {
         await scheduleDailyReminders();
-        Alert.alert('Enabled', 'Notifications enabled for sunrise and sunset');
+        Alert.alert('Enabled', 'Notifications enabled for your chosen times');
       }
     } else {
       await cancelAllReminders();
@@ -427,32 +559,123 @@ export default function SettingsScreen() {
   };
 
   const handleGarminLogin = async () => {
-    try {
-      // Using mock login for testing
-      const success = await mockGarminLogin();
-      if (success) {
-        setGarminAuthenticated(true);
-        loadGarminData();
-        Alert.alert('Success', 'Connected to Garmin (Mock)');
+    if (!garminEmail.trim()) {
+      Alert.alert('Missing Info', 'Please enter your Garmin email.');
+      return;
+    }
+
+    // If password is empty, try to use saved credentials
+    let passwordToUse = garminPassword;
+    if (!passwordToUse) {
+      const savedCredentials = await loadGarminCredentials();
+      if (savedCredentials && savedCredentials.email === garminEmail.trim()) {
+        passwordToUse = savedCredentials.password;
+      } else {
+        Alert.alert('Missing Info', 'Please enter your Garmin password.');
+        return;
       }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to connect to Garmin');
+    }
+
+    setGarminError(null);
+    setIsGarminConnecting(true);
+
+    try {
+      await signInWithGarmin({
+        email: garminEmail.trim(),
+        password: passwordToUse,
+        mfaCode: garminMfaCode.trim() || undefined,
+      });
+      setGarminAuthenticated(true);
+      
+      // Save credentials securely (always save, even if we used saved ones)
+      await saveGarminCredentials({
+        email: garminEmail.trim(),
+        password: passwordToUse,
+      });
+      
+      // Clear password field for security (but keep email)
+      setGarminPassword('');
+      setGarminMfaCode('');
+      // Sync data after successful login
+      await syncGarminData();
+      Alert.alert('Success', 'Connected to Garmin');
+    } catch (error: any) {
+      const message =
+        error?.message ?? 'Failed to connect to Garmin. Please try again.';
+      console.error('[SettingsScreen] Garmin login error:', {
+        message: error?.message,
+        stack: error?.stack,
+        error: error,
+      });
+      setGarminError(message);
+      Alert.alert('Error', message);
+    } finally {
+      setIsGarminConnecting(false);
     }
   };
 
   const handleGarminLogout = async () => {
-    Alert.alert('Disconnect Garmin', 'Are you sure you want to disconnect?', [
+    Alert.alert('Disconnect Garmin', 'Are you sure you want to disconnect? Your credentials will remain saved for easy reconnection.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Disconnect',
         style: 'destructive',
         onPress: async () => {
           await logoutGarmin();
+          // Note: We keep credentials saved so user can easily reconnect
+          // Only clear tokens, not credentials
           setGarminAuthenticated(false);
           setGarminData(null);
+          setGarminPassword('');
+          setGarminMfaCode('');
+          setGarminError(null);
         },
       },
     ]);
+  };
+
+  const handleDeleteGarminAccount = async () => {
+    Alert.alert(
+      'Delete Garmin Account',
+      'This will permanently delete your saved Garmin credentials and disconnect your account. You will need to re-enter your credentials to reconnect.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await logoutGarmin();
+            await clearGarminCredentials();
+            setGarminAuthenticated(false);
+            setGarminData(null);
+            setGarminEmail('');
+            setGarminPassword('');
+            setGarminMfaCode('');
+            setGarminError(null);
+            Alert.alert('Deleted', 'Garmin account credentials have been deleted.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleNotificationTimeChange = async (
+    type: 'sunrise' | 'sunset',
+    hour: number,
+    minute: number
+  ) => {
+    const newTimes = {
+      ...notificationTimes,
+      [`${type}Hour`]: hour,
+      [`${type}Minute`]: minute,
+    } as NotificationTimes;
+    setNotificationTimes(newTimes);
+    await saveNotificationTimes(newTimes);
+    
+    // Reschedule notifications if enabled
+    if (notificationsEnabled && location) {
+      await scheduleDailyReminders();
+    }
   };
 
   return (
@@ -465,9 +688,9 @@ export default function SettingsScreen() {
           <Text style={commonStyles.title}>Settings</Text>
         </View>
 
-        {/* Weather Section */}
+        {/* Units Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Weather</Text>
+          <Text style={styles.sectionTitle}>Units</Text>
           
           {/* Units Configuration */}
           <View style={styles.unitsContainer}>
@@ -572,7 +795,46 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+            
+            <View style={styles.unitRow}>
+              <Text style={styles.unitLabel}>Weight:</Text>
+              <View style={styles.unitToggleGroup}>
+                <TouchableOpacity
+                  style={[
+                    styles.unitToggle,
+                    weatherUnits.weight === 'kg' && styles.unitToggleActive,
+                  ]}
+                  onPress={() => handleWeightUnitChange('kg')}
+                >
+                  <Text style={[
+                    styles.unitToggleText,
+                    weatherUnits.weight === 'kg' && styles.unitToggleTextActive,
+                  ]}>
+                    kg
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.unitToggle,
+                    weatherUnits.weight === 'lbs' && styles.unitToggleActive,
+                  ]}
+                  onPress={() => handleWeightUnitChange('lbs')}
+                >
+                  <Text style={[
+                    styles.unitToggleText,
+                    weatherUnits.weight === 'lbs' && styles.unitToggleTextActive,
+                  ]}>
+                    lbs
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
+        </View>
+
+        {/* Location Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Location</Text>
           
           {/* Weather Alerts */}
           {oneCallWeather?.alerts && oneCallWeather.alerts.length > 0 && (
@@ -704,8 +966,26 @@ export default function SettingsScreen() {
           {garminAuthenticated ? (
             <>
               <View style={styles.card}>
-                <Text style={styles.cardLabel}>Status</Text>
-                <Text style={styles.cardValue}>✓ Connected (Mock)</Text>
+                <View style={styles.cardHeaderRow}>
+                  <View>
+                    <Text style={styles.cardLabel}>Status</Text>
+                    <Text style={styles.cardValue}>
+                      ✓ Connected
+                      {isGarminSyncing && ' (Syncing...)'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.refreshButton}
+                    onPress={syncGarminData}
+                    disabled={isGarminSyncing}
+                  >
+                    {isGarminSyncing ? (
+                      <ActivityIndicator size="small" color={colors.greenLight} />
+                    ) : (
+                      <Ionicons name="refresh" size={20} color={colors.greenLight} />
+                    )}
+                  </TouchableOpacity>
+                </View>
                 
                 {garminData && (
                   <>
@@ -733,36 +1013,128 @@ export default function SettingsScreen() {
                     {garminData.calories && (
                       <View style={styles.healthDataRow}>
                         <Text style={styles.healthDataLabel}>Calories</Text>
-                        <Text style={styles.healthDataValue}>
-                          🔥 {garminData.calories} cal
+                        <View style={styles.healthDataValueContainer}>
+                          <Ionicons name="flame" size={16} color={colors.greenLight} style={styles.healthDataIcon} />
+                          <Text style={styles.healthDataValue}>
+                            {garminData.calories} cal
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                    {garminData.heartRate && (
+                      <View style={styles.healthDataRow}>
+                        <Text style={styles.healthDataLabel}>Resting HR</Text>
+                        <View style={styles.healthDataValueContainer}>
+                          <Ionicons name="heart" size={16} color={colors.greenLight} style={styles.healthDataIcon} />
+                          <Text style={styles.healthDataValue}>
+                            {garminData.heartRate} bpm
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                    {garminData.sleep && garminData.sleep.duration && (
+                      <View style={styles.healthDataRow}>
+                        <Text style={styles.healthDataLabel}>Sleep</Text>
+                        <View style={styles.healthDataValueContainer}>
+                          <Ionicons name="moon" size={16} color={colors.greenLight} style={styles.healthDataIcon} />
+                          <Text style={styles.healthDataValue}>
+                            {Math.floor(garminData.sleep.duration / 60)}h {garminData.sleep.duration % 60}m
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                    {garminData.weight && (
+                      <View style={styles.healthDataRow}>
+                        <Text style={styles.healthDataLabel}>
+                          Weight{garminData.weightDate && garminData.weightDate !== garminData.date ? ' (Last logged)' : ''}
                         </Text>
+                        <View style={styles.healthDataValueContainer}>
+                          <Ionicons 
+                            name="barbell" 
+                            size={16} 
+                            color={garminData.weightDate && garminData.weightDate !== garminData.date ? colors.greyMedium : colors.greenLight} 
+                            style={styles.healthDataIcon} 
+                          />
+                          <Text 
+                            style={[
+                              styles.healthDataValue,
+                              garminData.weightDate && garminData.weightDate !== garminData.date && styles.healthDataValueGreyed
+                            ]}
+                          >
+                            {weatherUnits.weight === 'lbs' 
+                              ? `${(garminData.weight * 2.20462).toFixed(1)} lbs`
+                              : `${garminData.weight.toFixed(1)} kg`}
+                          </Text>
+                        </View>
                       </View>
                     )}
                   </>
                 )}
               </View>
-              <TouchableOpacity
-                style={[commonStyles.buttonOutline, styles.dangerButton]}
-                onPress={handleGarminLogout}
-              >
-                <Text style={styles.dangerButtonText}>Disconnect</Text>
-              </TouchableOpacity>
+              <View style={styles.garminActions}>
+                <TouchableOpacity
+                  style={[commonStyles.buttonOutline, styles.dangerButton]}
+                  onPress={handleGarminLogout}
+                >
+                  <Text style={styles.dangerButtonText}>Disconnect</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[commonStyles.buttonOutline, styles.dangerButton, { marginTop: spacing.sm }]}
+                  onPress={handleDeleteGarminAccount}
+                >
+                  <Text style={styles.dangerButtonText}>Delete Account</Text>
+                </TouchableOpacity>
+              </View>
             </>
           ) : (
-            <>
-              <View style={styles.card}>
-                <Text style={styles.cardText}>Not connected</Text>
-                <Text style={styles.cardSubtext}>
-                  Connect to view your health stats (Mock login for testing)
-                </Text>
-              </View>
+            <View style={styles.card}>
+              <Text style={styles.cardText}>Connect your Garmin account</Text>
+              <Text style={styles.cardSubtext}>
+                Enter your Garmin credentials to sync today&apos;s activity.
+              </Text>
+              <TextInput
+                style={commonStyles.input}
+                placeholder="Garmin email"
+                placeholderTextColor={colors.greyMedium}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={garminEmail}
+                onChangeText={setGarminEmail}
+              />
+              <TextInput
+                style={commonStyles.input}
+                placeholder="Garmin password"
+                placeholderTextColor={colors.greyMedium}
+                secureTextEntry
+                value={garminPassword}
+                onChangeText={setGarminPassword}
+              />
+              <TextInput
+                style={commonStyles.input}
+                placeholder="MFA code (optional)"
+                placeholderTextColor={colors.greyMedium}
+                keyboardType="number-pad"
+                value={garminMfaCode}
+                onChangeText={setGarminMfaCode}
+              />
+              {garminError && (
+                <Text style={styles.errorText}>{garminError}</Text>
+              )}
               <TouchableOpacity
-                style={commonStyles.button}
+                style={[
+                  commonStyles.button,
+                  isGarminConnecting && styles.buttonDisabled,
+                ]}
                 onPress={handleGarminLogin}
+                disabled={isGarminConnecting}
               >
-                <Text style={commonStyles.buttonText}>Connect Garmin (Mock)</Text>
+                {isGarminConnecting ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={commonStyles.buttonText}>Connect Garmin</Text>
+                )}
               </TouchableOpacity>
-            </>
+            </View>
           )}
         </View>
 
@@ -774,7 +1146,7 @@ export default function SettingsScreen() {
               <View style={styles.settingInfo}>
                 <Text style={styles.settingLabel}>Daily Reminders</Text>
                 <Text style={styles.settingDescription}>
-                  Get notified at sunrise and sunset
+                  Get notified at your chosen times
                 </Text>
               </View>
               <Switch
@@ -784,6 +1156,126 @@ export default function SettingsScreen() {
                 thumbColor={colors.white}
               />
             </View>
+            
+            {notificationsEnabled && (
+              <>
+                <View style={styles.divider} />
+                
+                {/* Sunrise Time Picker */}
+                <View style={styles.timePickerContainer}>
+                  <Text style={styles.timePickerLabel}>Sunrise Notification</Text>
+                  <View style={styles.timePickerRow}>
+                    <View style={styles.timePickerGroup}>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newHour = (notificationTimes.sunriseHour + 1) % 24;
+                          handleNotificationTimeChange('sunrise', newHour, notificationTimes.sunriseMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                      <Text style={styles.timePickerValue}>
+                        {notificationTimes.sunriseHour.toString().padStart(2, '0')}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newHour = (notificationTimes.sunriseHour - 1 + 24) % 24;
+                          handleNotificationTimeChange('sunrise', newHour, notificationTimes.sunriseMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={styles.timePickerSeparator}>:</Text>
+                    
+                    <View style={styles.timePickerGroup}>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newMinute = (notificationTimes.sunriseMinute + 15) % 60;
+                          handleNotificationTimeChange('sunrise', notificationTimes.sunriseHour, newMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                      <Text style={styles.timePickerValue}>
+                        {notificationTimes.sunriseMinute.toString().padStart(2, '0')}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newMinute = (notificationTimes.sunriseMinute - 15 + 60) % 60;
+                          handleNotificationTimeChange('sunrise', notificationTimes.sunriseHour, newMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+                
+                <View style={styles.divider} />
+                
+                {/* Sunset Time Picker */}
+                <View style={styles.timePickerContainer}>
+                  <Text style={styles.timePickerLabel}>Sunset Notification</Text>
+                  <View style={styles.timePickerRow}>
+                    <View style={styles.timePickerGroup}>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newHour = (notificationTimes.sunsetHour + 1) % 24;
+                          handleNotificationTimeChange('sunset', newHour, notificationTimes.sunsetMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                      <Text style={styles.timePickerValue}>
+                        {notificationTimes.sunsetHour.toString().padStart(2, '0')}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newHour = (notificationTimes.sunsetHour - 1 + 24) % 24;
+                          handleNotificationTimeChange('sunset', newHour, notificationTimes.sunsetMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={styles.timePickerSeparator}>:</Text>
+                    
+                    <View style={styles.timePickerGroup}>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newMinute = (notificationTimes.sunsetMinute + 15) % 60;
+                          handleNotificationTimeChange('sunset', notificationTimes.sunsetHour, newMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                      <Text style={styles.timePickerValue}>
+                        {notificationTimes.sunsetMinute.toString().padStart(2, '0')}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.timePickerButton}
+                        onPress={() => {
+                          const newMinute = (notificationTimes.sunsetMinute - 15 + 60) % 60;
+                          handleNotificationTimeChange('sunset', notificationTimes.sunsetHour, newMinute);
+                        }}
+                      >
+                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -826,13 +1318,13 @@ export default function SettingsScreen() {
               <View style={styles.tipContent}>
                 <Ionicons name="information-circle" size={16} color={colors.greenLight} style={styles.tipIcon} />
                 <Text style={styles.tipText}>
-                  Tip: For best results, include state/country (e.g., "Rogers, Arkansas" or "Portland, Oregon")
+                  Tip: For best results, include state/country (e.g., "New York, New York" or "Portland, Oregon")
                 </Text>
               </View>
             </View>
             <TextInput
               style={commonStyles.input}
-              placeholder="e.g., Rogers, Arkansas"
+              placeholder="e.g., New York, New York"
               placeholderTextColor={colors.greyMedium}
               value={cityInput}
               onChangeText={setCityInput}
@@ -1016,6 +1508,18 @@ const styles = StyleSheet.create({
     color: colors.greyVeryLight,
     fontSize: fontSize.sm,
   },
+  errorText: {
+    color: colors.error,
+    fontSize: fontSize.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs,
+  },
   cardLabel: {
     color: colors.greyVeryLight,
     fontSize: fontSize.sm,
@@ -1025,6 +1529,15 @@ const styles = StyleSheet.create({
     color: colors.greenLight,
     fontSize: fontSize.lg,
     fontWeight: fontWeight.semibold,
+  },
+  refreshButton: {
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.greyLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 40,
+    minHeight: 40,
   },
   weatherHeader: {
     flexDirection: 'row',
@@ -1097,6 +1610,9 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: fontSize.md,
     fontWeight: fontWeight.semibold,
+  },
+  healthDataValueGreyed: {
+    color: colors.greyMedium,
   },
   divider: {
     height: 1,
@@ -1350,6 +1866,48 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: fontSize.md,
     fontWeight: fontWeight.semibold,
+  },
+  garminActions: {
+    marginTop: spacing.md,
+  },
+  timePickerContainer: {
+    marginVertical: spacing.md,
+  },
+  timePickerLabel: {
+    color: colors.greyVeryLight,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.medium,
+    marginBottom: spacing.sm,
+  },
+  timePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  timePickerGroup: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  timePickerButton: {
+    padding: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.greyLight,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timePickerValue: {
+    color: colors.white,
+    fontSize: fontSize.xxl,
+    fontWeight: fontWeight.bold,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  timePickerSeparator: {
+    color: colors.white,
+    fontSize: fontSize.xxl,
+    fontWeight: fontWeight.bold,
   },
 });
 

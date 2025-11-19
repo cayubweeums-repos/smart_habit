@@ -1,23 +1,30 @@
 # General
 
 
+# Charts
+- [ ] Have charts be dynamically interactive
+  - Allow user to select what values to be shown on the different axis and represented in different associations. 
+    - i.e. How does getting my steps in affect my sleep? How does late caffeine affect my sleep?
+
 # Habit
 - [ ] Add 'preset' habits
-    - Morning Caffeine
-    - Evening Caffeine
-    - In bed on time
-    - Awoke on time
-    - Light Exercise
-    - Moderate Exercise
-    - Vigorous Exercise
-    - Healthy Meals
-    - Heavy Meals
-    - Intermittent Fasting
-    - Shared Bed
-    - Animals in Bed
-    - Sleep Sounds
-    - Alcohol
-    - Late Meals
+    - Morning Caffeine (morning)
+    - Evening Caffeine (bedtime)
+    - In bed on time (bedtime)
+    - Awoke on time (morning)
+    - Light Exercise (health)
+    - Moderate Exercise (health)
+    - Vigorous Exercise (health)
+    - Healthy Meals (health)
+    - Heavy Meals (health)
+    - Intermittent Fasting (health)
+    - Shared Bed (bedtime)
+    - Animals in Bed (bedtime)
+    - Sleep Sounds (bedtime)
+    - Alcohol (health)
+    - Late Meals (health)
+    - Intimate Release (health)
+
     - Cold Shower/Bath
     - Journaling
     - Sauna/Steam Room
@@ -46,10 +53,6 @@
     - injured
     - migraines
     - traveling
-- [ ] Add habit categories
-    - [ ] Morning time
-    - [ ] Health related
-    - [ ] Bed time
 
 # Fixes/Bugs
 

@@ -24,7 +24,7 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: "com.smarthabit.tracker",
       infoPlist: {
-        UIBackgroundModes: ["location", "fetch"],
+        UIBackgroundModes: ["location", "processing"],
         NSLocationWhenInUseUsageDescription: "This app needs your location to calculate sunrise and sunset times for habit reminders.",
         NSLocationAlwaysUsageDescription: "This app needs your location to calculate sunrise and sunset times for habit reminders."
       }
@@ -64,12 +64,7 @@ module.exports = {
           locationAlwaysAndWhenInUsePermission: "This app needs your location to calculate sunrise and sunset times for habit reminders."
         }
       ],
-      [
-        "expo-background-fetch",
-        {
-          mode: "fetch"
-        }
-      ]
+      "expo-background-task"
     ],
     extra: {
       eas: {
