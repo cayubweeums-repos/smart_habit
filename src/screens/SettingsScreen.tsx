@@ -10,6 +10,7 @@ import {
   Switch,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,15 +33,15 @@ import {
 import {
   loadLocationSettings,
   saveLocationSettings,
-  loadNotificationsEnabled,
-  saveNotificationsEnabled,
   loadWeatherUnits,
   saveWeatherUnits,
   saveGarminCredentials,
   loadGarminCredentials,
   clearGarminCredentials,
-  saveNotificationTimes,
+  loadNotificationsEnabled,
+  saveNotificationsEnabled,
   loadNotificationTimes,
+  saveNotificationTimes,
   type GarminCredentials,
   type NotificationTimes,
 } from '../storage/settingsStorage';
@@ -66,7 +67,7 @@ import {
 import {
   requestNotificationPermissions,
   scheduleDailyReminders,
-  cancelAllReminders,
+  cancelAllNotifications,
 } from '../services/notificationService';
 import { getTodayKey } from '../utils';
 
@@ -77,7 +78,6 @@ export default function SettingsScreen() {
   const [oneCallWeather, setOneCallWeather] = useState<OneCallWeatherData | null>(null);
   const [garminAuthenticated, setGarminAuthenticated] = useState(false);
   const [garminData, setGarminData] = useState<GarminHealthData | null>(null);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [forecastModalVisible, setForecastModalVisible] = useState(false);
   const [cityInput, setCityInput] = useState('');
@@ -96,12 +96,17 @@ export default function SettingsScreen() {
   const [isGarminConnecting, setIsGarminConnecting] = useState(false);
   const [isGarminSyncing, setIsGarminSyncing] = useState(false);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationTimes, setNotificationTimes] = useState<NotificationTimes>({
-    sunriseHour: 6,
-    sunriseMinute: 0,
-    sunsetHour: 18,
-    sunsetMinute: 0,
+    morningHour: 8,
+    morningMinute: 0,
+    eveningHour: 20,
+    eveningMinute: 0,
   });
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [timePickerType, setTimePickerType] = useState<'morning' | 'evening' | null>(null);
+  const [tempHour, setTempHour] = useState(8);
+  const [tempMinute, setTempMinute] = useState(0);
 
   // Load settings on mount and when screen comes into focus
   useFocusEffect(
@@ -153,16 +158,21 @@ export default function SettingsScreen() {
     const savedLocation = await loadLocationSettings();
     setLocation(savedLocation);
 
-    const notifEnabled = await loadNotificationsEnabled();
-    // Ensure it's always a boolean
-    setNotificationsEnabled(notifEnabled === true || notifEnabled === 'true');
-
     const units = await loadWeatherUnits();
     setWeatherUnits(units);
 
+    const notifEnabled = await loadNotificationsEnabled();
+    setNotificationsEnabled(notifEnabled);
+
     const savedNotificationTimes = await loadNotificationTimes();
     if (savedNotificationTimes) {
-      setNotificationTimes(savedNotificationTimes);
+      // Merge with defaults to ensure all properties exist
+      setNotificationTimes({
+        morningHour: savedNotificationTimes.morningHour ?? 8,
+        morningMinute: savedNotificationTimes.morningMinute ?? 0,
+        eveningHour: savedNotificationTimes.eveningHour ?? 20,
+        eveningMinute: savedNotificationTimes.eveningMinute ?? 0,
+      });
     }
 
     // Load saved Garmin credentials
@@ -416,12 +426,6 @@ export default function SettingsScreen() {
       
       setLocationModalVisible(false);
 
-      // Reschedule notifications with new location
-      if (notificationsEnabled) {
-        console.log('[Location] Rescheduling notifications...');
-        await scheduleDailyReminders();
-      }
-
       console.log('[Location] Success!');
       Alert.alert(
         'Success', 
@@ -515,11 +519,6 @@ export default function SettingsScreen() {
       setLocationModalVisible(false);
       setCityInput('');
 
-      if (notificationsEnabled) {
-        console.log('[Location] Rescheduling notifications...');
-        await scheduleDailyReminders();
-      }
-
       console.log('[Location] Manual location set successfully');
       Alert.alert('Success', `Location set to ${cityDisplay}`);
     } catch (error: any) {
@@ -542,21 +541,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleNotificationToggle = async (value: boolean) => {
-    setNotificationsEnabled(value);
-    await saveNotificationsEnabled(value);
-
-    if (value) {
-      const granted = await requestNotificationPermissions();
-      if (granted && location) {
-        await scheduleDailyReminders();
-        Alert.alert('Enabled', 'Notifications enabled for your chosen times');
-      }
-    } else {
-      await cancelAllReminders();
-      Alert.alert('Disabled', 'All notifications have been cancelled');
-    }
-  };
 
   const handleGarminLogin = async () => {
     if (!garminEmail.trim()) {
@@ -659,24 +643,87 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleNotificationTimeChange = async (
-    type: 'sunrise' | 'sunset',
-    hour: number,
-    minute: number
-  ) => {
+  const handleNotificationToggle = async (value: boolean) => {
+    setNotificationsEnabled(value);
+    await saveNotificationsEnabled(value);
+
+    if (value) {
+      const granted = await requestNotificationPermissions();
+      if (granted) {
+        const times = {
+          morningHour: notificationTimes.morningHour ?? 8,
+          morningMinute: notificationTimes.morningMinute ?? 0,
+          eveningHour: notificationTimes.eveningHour ?? 20,
+          eveningMinute: notificationTimes.eveningMinute ?? 0,
+        };
+        await scheduleDailyReminders(
+          times.morningHour,
+          times.morningMinute,
+          times.eveningHour,
+          times.eveningMinute
+        );
+        Alert.alert('Enabled', 'Daily reminders have been scheduled');
+      }
+    } else {
+      await cancelAllNotifications();
+      Alert.alert('Disabled', 'All reminders have been cancelled');
+    }
+  };
+
+  const openTimePicker = (type: 'morning' | 'evening') => {
+    const currentTimes = {
+      morningHour: notificationTimes.morningHour ?? 8,
+      morningMinute: notificationTimes.morningMinute ?? 0,
+      eveningHour: notificationTimes.eveningHour ?? 20,
+      eveningMinute: notificationTimes.eveningMinute ?? 0,
+    };
+    
+    const hour = type === 'morning' ? currentTimes.morningHour : currentTimes.eveningHour;
+    const minute = type === 'morning' ? currentTimes.morningMinute : currentTimes.eveningMinute;
+    
+    setTempHour(hour);
+    setTempMinute(minute);
+    setTimePickerType(type);
+    setTimePickerVisible(true);
+  };
+
+  const confirmTimeChange = async () => {
+    if (!timePickerType) return;
+    
+    // Validate hour and minute
+    const hour = Math.max(0, Math.min(23, Math.floor(tempHour)));
+    const minute = Math.max(0, Math.min(59, Math.floor(tempMinute)));
+    
+    const currentTimes = {
+      morningHour: notificationTimes.morningHour ?? 8,
+      morningMinute: notificationTimes.morningMinute ?? 0,
+      eveningHour: notificationTimes.eveningHour ?? 20,
+      eveningMinute: notificationTimes.eveningMinute ?? 0,
+    };
+    
     const newTimes = {
-      ...notificationTimes,
-      [`${type}Hour`]: hour,
-      [`${type}Minute`]: minute,
+      ...currentTimes,
+      [`${timePickerType}Hour`]: hour,
+      [`${timePickerType}Minute`]: minute,
     } as NotificationTimes;
+    
     setNotificationTimes(newTimes);
     await saveNotificationTimes(newTimes);
     
-    // Reschedule notifications if enabled
-    if (notificationsEnabled && location) {
-      await scheduleDailyReminders();
+    // Only reschedule notifications if enabled
+    if (notificationsEnabled) {
+      await scheduleDailyReminders(
+        newTimes.morningHour,
+        newTimes.morningMinute,
+        newTimes.eveningHour,
+        newTimes.eveningMinute
+      );
     }
+    
+    setTimePickerVisible(false);
+    setTimePickerType(null);
   };
+
 
   return (
     <View style={[commonStyles.container, { paddingTop: insets.top }]}>
@@ -1150,7 +1197,7 @@ export default function SettingsScreen() {
                 </Text>
               </View>
               <Switch
-                value={!!notificationsEnabled}
+                value={notificationsEnabled}
                 onValueChange={handleNotificationToggle}
                 trackColor={{ false: colors.greyLight, true: colors.green }}
                 thumbColor={colors.white}
@@ -1161,123 +1208,42 @@ export default function SettingsScreen() {
               <>
                 <View style={styles.divider} />
                 
-                {/* Sunrise Time Picker */}
+                {/* Morning Time Picker */}
                 <View style={styles.timePickerContainer}>
-                  <Text style={styles.timePickerLabel}>Sunrise Notification</Text>
-                  <View style={styles.timePickerRow}>
-                    <View style={styles.timePickerGroup}>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newHour = (notificationTimes.sunriseHour + 1) % 24;
-                          handleNotificationTimeChange('sunrise', newHour, notificationTimes.sunriseMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                      <Text style={styles.timePickerValue}>
-                        {notificationTimes.sunriseHour.toString().padStart(2, '0')}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newHour = (notificationTimes.sunriseHour - 1 + 24) % 24;
-                          handleNotificationTimeChange('sunrise', newHour, notificationTimes.sunriseMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                    </View>
-                    
-                    <Text style={styles.timePickerSeparator}>:</Text>
-                    
-                    <View style={styles.timePickerGroup}>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newMinute = (notificationTimes.sunriseMinute + 15) % 60;
-                          handleNotificationTimeChange('sunrise', notificationTimes.sunriseHour, newMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                      <Text style={styles.timePickerValue}>
-                        {notificationTimes.sunriseMinute.toString().padStart(2, '0')}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newMinute = (notificationTimes.sunriseMinute - 15 + 60) % 60;
-                          handleNotificationTimeChange('sunrise', notificationTimes.sunriseHour, newMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <Text style={styles.timePickerLabel}>Morning Reminder</Text>
+                  <TouchableOpacity
+                    style={styles.timePickerButton}
+                    onPress={() => openTimePicker('morning')}
+                  >
+                    <Text style={styles.timePickerValue}>
+                      {(notificationTimes.morningHour ?? 8).toString().padStart(2, '0')}:
+                      {(notificationTimes.morningMinute ?? 0).toString().padStart(2, '0')}
+                    </Text>
+                    <Ionicons name="time-outline" size={20} color={colors.greenLight} />
+                  </TouchableOpacity>
                 </View>
                 
                 <View style={styles.divider} />
                 
-                {/* Sunset Time Picker */}
+                {/* Evening Time Picker */}
                 <View style={styles.timePickerContainer}>
-                  <Text style={styles.timePickerLabel}>Sunset Notification</Text>
-                  <View style={styles.timePickerRow}>
-                    <View style={styles.timePickerGroup}>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newHour = (notificationTimes.sunsetHour + 1) % 24;
-                          handleNotificationTimeChange('sunset', newHour, notificationTimes.sunsetMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                      <Text style={styles.timePickerValue}>
-                        {notificationTimes.sunsetHour.toString().padStart(2, '0')}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newHour = (notificationTimes.sunsetHour - 1 + 24) % 24;
-                          handleNotificationTimeChange('sunset', newHour, notificationTimes.sunsetMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                    </View>
-                    
-                    <Text style={styles.timePickerSeparator}>:</Text>
-                    
-                    <View style={styles.timePickerGroup}>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newMinute = (notificationTimes.sunsetMinute + 15) % 60;
-                          handleNotificationTimeChange('sunset', notificationTimes.sunsetHour, newMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-up" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                      <Text style={styles.timePickerValue}>
-                        {notificationTimes.sunsetMinute.toString().padStart(2, '0')}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.timePickerButton}
-                        onPress={() => {
-                          const newMinute = (notificationTimes.sunsetMinute - 15 + 60) % 60;
-                          handleNotificationTimeChange('sunset', notificationTimes.sunsetHour, newMinute);
-                        }}
-                      >
-                        <Ionicons name="chevron-down" size={20} color={colors.greenLight} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <Text style={styles.timePickerLabel}>Evening Reminder</Text>
+                  <TouchableOpacity
+                    style={styles.timePickerButton}
+                    onPress={() => openTimePicker('evening')}
+                  >
+                    <Text style={styles.timePickerValue}>
+                      {(notificationTimes.eveningHour ?? 20).toString().padStart(2, '0')}:
+                      {(notificationTimes.eveningMinute ?? 0).toString().padStart(2, '0')}
+                    </Text>
+                    <Ionicons name="time-outline" size={20} color={colors.greenLight} />
+                  </TouchableOpacity>
                 </View>
               </>
             )}
           </View>
         </View>
+
       </ScrollView>
 
       {/* Location Modal */}
@@ -1425,6 +1391,91 @@ export default function SettingsScreen() {
                 </View>
               ))}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Time Picker Modal */}
+      <Modal
+        visible={timePickerVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setTimePickerVisible(false);
+          setTimePickerType(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {timePickerType === 'morning' ? 'Morning Reminder' : 'Evening Reminder'}
+            </Text>
+            
+            <View style={styles.timeInputContainer}>
+              <View style={styles.timeInputGroup}>
+                <Text style={styles.timeInputLabel}>Hour (0-23)</Text>
+                <TextInput
+                  style={styles.timeInput}
+                  value={tempHour.toString()}
+                  onChangeText={(text) => {
+                    const num = parseInt(text, 10);
+                    if (!isNaN(num)) {
+                      setTempHour(Math.max(0, Math.min(23, num)));
+                    } else if (text === '') {
+                      setTempHour(0);
+                    }
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="8"
+                />
+              </View>
+              
+              <Text style={styles.timeSeparator}>:</Text>
+              
+              <View style={styles.timeInputGroup}>
+                <Text style={styles.timeInputLabel}>Minute (0-59)</Text>
+                <TextInput
+                  style={styles.timeInput}
+                  value={tempMinute.toString()}
+                  onChangeText={(text) => {
+                    const num = parseInt(text, 10);
+                    if (!isNaN(num)) {
+                      setTempMinute(Math.max(0, Math.min(59, num)));
+                    } else if (text === '') {
+                      setTempMinute(0);
+                    }
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="0"
+                />
+              </View>
+            </View>
+            
+            <View style={styles.timePreview}>
+              <Text style={styles.timePreviewText}>
+                {tempHour.toString().padStart(2, '0')}:{tempMinute.toString().padStart(2, '0')}
+              </Text>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[commonStyles.buttonOutline, styles.modalButton]}
+                onPress={() => {
+                  setTimePickerVisible(false);
+                  setTimePickerType(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[commonStyles.button, styles.modalButton]}
+                onPress={confirmTimeChange}
+              >
+                <Text style={commonStyles.buttonText}>Set</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1879,34 +1930,61 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.medium,
     marginBottom: spacing.sm,
   },
-  timePickerRow: {
+  timePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.greyLight,
+    gap: spacing.sm,
+  },
+  timePickerValue: {
+    color: colors.white,
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.semibold,
+  },
+  timeInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
+    marginVertical: spacing.lg,
   },
-  timePickerGroup: {
+  timeInputGroup: {
     alignItems: 'center',
     gap: spacing.xs,
   },
-  timePickerButton: {
-    padding: spacing.xs,
-    borderRadius: borderRadius.sm,
-    backgroundColor: colors.greyLight,
-    minWidth: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+  timeInputLabel: {
+    color: colors.greyVeryLight,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.medium,
   },
-  timePickerValue: {
+  timeInput: {
+    backgroundColor: colors.greyLight,
     color: colors.white,
     fontSize: fontSize.xxl,
     fontWeight: fontWeight.bold,
-    minWidth: 50,
     textAlign: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    minWidth: 80,
+    borderWidth: 2,
+    borderColor: colors.grey,
   },
-  timePickerSeparator: {
+  timeSeparator: {
     color: colors.white,
     fontSize: fontSize.xxl,
+    fontWeight: fontWeight.bold,
+    marginTop: spacing.lg,
+  },
+  timePreview: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  timePreviewText: {
+    color: colors.greenLight,
+    fontSize: fontSize.xxxl,
     fontWeight: fontWeight.bold,
   },
 });

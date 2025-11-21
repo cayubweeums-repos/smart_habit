@@ -3,8 +3,8 @@ import * as SecureStore from 'expo-secure-store';
 import { LocationSettings, GarminAuthTokens, WeatherUnits } from '../types';
 
 const LOCATION_KEY = '@location_settings';
-const NOTIFICATIONS_ENABLED_KEY = '@notifications_enabled';
 const WEATHER_UNITS_KEY = '@weather_units';
+const NOTIFICATIONS_ENABLED_KEY = '@notifications_enabled';
 const NOTIFICATION_TIMES_KEY = '@notification_times';
 
 // Location Settings
@@ -28,6 +28,13 @@ export const loadLocationSettings = async (): Promise<LocationSettings | null> =
 };
 
 // Notification Settings
+export interface NotificationTimes {
+  morningHour: number;
+  morningMinute: number;
+  eveningHour: number;
+  eveningMinute: number;
+}
+
 export const saveNotificationsEnabled = async (enabled: boolean): Promise<void> => {
   try {
     await AsyncStorage.setItem(NOTIFICATIONS_ENABLED_KEY, JSON.stringify(enabled));
@@ -41,16 +48,60 @@ export const loadNotificationsEnabled = async (): Promise<boolean> => {
   try {
     const enabledJson = await AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
     if (!enabledJson) {
-      return true; // default to enabled
+      return false; // default to disabled
     }
     const enabled = JSON.parse(enabledJson);
-    // Normalize boolean - handle cases where it might be stored as a string
     return enabled === true || enabled === 'true';
   } catch (error) {
     console.error('Error loading notifications enabled:', error);
-    return true;
+    return false;
   }
 };
+
+export const saveNotificationTimes = async (times: NotificationTimes): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(NOTIFICATION_TIMES_KEY, JSON.stringify(times));
+  } catch (error) {
+    console.error('Error saving notification times:', error);
+    throw error;
+  }
+};
+
+export const loadNotificationTimes = async (): Promise<NotificationTimes | null> => {
+  try {
+    const timesJson = await AsyncStorage.getItem(NOTIFICATION_TIMES_KEY);
+    if (!timesJson) {
+      return null;
+    }
+    
+    const times = JSON.parse(timesJson);
+    
+    // Handle migration from old format (sunriseHour/sunsetHour) to new format (morningHour/eveningHour)
+    if (times.sunriseHour !== undefined || times.sunsetHour !== undefined) {
+      const migratedTimes: NotificationTimes = {
+        morningHour: times.sunriseHour ?? times.morningHour ?? 8,
+        morningMinute: times.sunriseMinute ?? times.morningMinute ?? 0,
+        eveningHour: times.sunsetHour ?? times.eveningHour ?? 20,
+        eveningMinute: times.sunsetMinute ?? times.eveningMinute ?? 0,
+      };
+      // Save migrated format
+      await saveNotificationTimes(migratedTimes);
+      return migratedTimes;
+    }
+    
+    // Ensure all properties exist
+    if (times.morningHour !== undefined && times.morningMinute !== undefined &&
+        times.eveningHour !== undefined && times.eveningMinute !== undefined) {
+      return times as NotificationTimes;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error loading notification times:', error);
+    return null;
+  }
+};
+
 
 // Garmin Auth Tokens (using SecureStore for sensitive data)
 // Split tokens to avoid SecureStore 2048 byte limit
@@ -165,32 +216,6 @@ export const clearGarminCredentials = async (): Promise<void> => {
   }
 };
 
-// Notification Times
-export interface NotificationTimes {
-  sunriseHour: number;
-  sunriseMinute: number;
-  sunsetHour: number;
-  sunsetMinute: number;
-}
-
-export const saveNotificationTimes = async (times: NotificationTimes): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(NOTIFICATION_TIMES_KEY, JSON.stringify(times));
-  } catch (error) {
-    console.error('Error saving notification times:', error);
-    throw error;
-  }
-};
-
-export const loadNotificationTimes = async (): Promise<NotificationTimes | null> => {
-  try {
-    const timesJson = await AsyncStorage.getItem(NOTIFICATION_TIMES_KEY);
-    return timesJson ? JSON.parse(timesJson) : null;
-  } catch (error) {
-    console.error('Error loading notification times:', error);
-    return null;
-  }
-};
 
 // Weather Units
 export const saveWeatherUnits = async (units: WeatherUnits): Promise<void> => {

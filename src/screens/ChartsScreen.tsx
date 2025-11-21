@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LineChart } from 'react-native-chart-kit';
+import { LineChart, BarChart } from 'react-native-chart-kit';
 import { colors, spacing, borderRadius, fontSize, fontWeight, commonStyles } from '../theme';
 import { Habit, HabitStats } from '../types';
-import { loadHabits, calculateHabitStats, getHabitEntriesInRange, getGarminHealthDataInRange } from '../storage';
+import { loadHabits, calculateHabitStats, getHabitEntriesInRange, getGarminHealthDataInRange, loadDailyLogs } from '../storage';
 import { getLastNDaysRange, formatShortDate, parseDateKey } from '../utils';
 
 const screenWidth = Dimensions.get('window').width;
@@ -52,6 +52,7 @@ export default function ChartsScreen() {
   const [selectedHabitIds, setSelectedHabitIds] = useState<string[]>([]);
   const [allStats, setAllStats] = useState<{ [habitId: string]: HabitStats }>({});
   const [chartData, setChartData] = useState<any>(null);
+  const [weeklyActivityData, setWeeklyActivityData] = useState<any>(null);
   const [timeRange, setTimeRange] = useState<number>(7); // days - changed from 30 to 7
   const [selectionModalVisible, setSelectionModalVisible] = useState(false);
   const [comparisonItems, setComparisonItems] = useState<ComparisonItem[]>([]);
@@ -87,8 +88,72 @@ export default function ChartsScreen() {
     }
     setAllStats(statsMap);
     
-    // Generate chart data for all habits
-    await generateChartData(activeHabits, allHabitIds, timeRange);
+    // Generate weekly activity chart
+    await generateWeeklyActivityChart();
+  };
+
+  const generateWeeklyActivityChart = async () => {
+    try {
+      const logs = await loadDailyLogs();
+      
+      // Get all unique dates that have any log entry
+      const loggedDates = new Set<string>();
+      logs.forEach(log => {
+        if (log.entries && log.entries.length > 0) {
+          loggedDates.add(log.date);
+        }
+      });
+      
+      if (loggedDates.size === 0) {
+        setWeeklyActivityData(null);
+        return;
+      }
+      
+      // Group dates by week (starting from Monday)
+      const weeksMap: { [weekKey: string]: number } = {};
+      
+      loggedDates.forEach(dateStr => {
+        const date = parseDateKey(dateStr);
+        // Get Monday of the week (ISO week starts on Monday)
+        const dayOfWeek = date.getDay();
+        const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust when day is Sunday
+        const monday = new Date(date);
+        monday.setDate(diff);
+        monday.setHours(0, 0, 0, 0);
+        
+        const weekKey = monday.toISOString().split('T')[0];
+        
+        if (!weeksMap[weekKey]) {
+          weeksMap[weekKey] = 0;
+        }
+        weeksMap[weekKey]++;
+      });
+      
+      // Sort weeks chronologically
+      const sortedWeeks = Object.keys(weeksMap).sort();
+      
+      // Get last 12 weeks (or all if less than 12)
+      const recentWeeks = sortedWeeks.slice(-12);
+      
+      // Format week labels (e.g., "Jan 1" for the Monday of that week)
+      const labels = recentWeeks.map(weekKey => {
+        const weekStart = parseDateKey(weekKey);
+        return formatShortDate(weekStart);
+      });
+      
+      // Get days logged per week
+      const data = recentWeeks.map(weekKey => weeksMap[weekKey]);
+      
+      setWeeklyActivityData({
+        labels: labels.length > 0 ? labels : ['No data'],
+        datasets: [{
+          data: data.length > 0 ? data : [0],
+        }],
+      });
+    } catch (error) {
+      console.error('Error generating weekly activity chart:', error);
+      setWeeklyActivityData(null);
+    }
   };
 
   const generateChartData = async (
@@ -96,59 +161,8 @@ export default function ChartsScreen() {
     habitIdsToShow: string[],
     days: number
   ) => {
-    if (habitIdsToShow.length === 0) {
-      setChartData(null);
-      return;
-    }
-
-    const { startDate, endDate } = getLastNDaysRange(days);
-    
-    // Get entries for all selected habits
-    const allEntriesMap: { [habitId: string]: any[] } = {};
-    for (const habitId of habitIdsToShow) {
-      const entries = await getHabitEntriesInRange(habitId, startDate, endDate);
-      allEntriesMap[habitId] = entries;
-    }
-    
-    // Create date labels and calculate completion percentages in a single loop
-    const dates: string[] = [];
-    const completionPercentages: number[] = [];
-    let currentDate = parseDateKey(startDate);
-    const end = parseDateKey(endDate);
-    
-    while (currentDate <= end) {
-      const dateKey = currentDate.toISOString().split('T')[0];
-      
-      // Add date label
-      dates.push(formatShortDate(dateKey));
-      
-      // Count how many habits were completed on this day
-      let completedCount = 0;
-      for (const habitId of habitIdsToShow) {
-        const entries = allEntriesMap[habitId];
-        const entry = entries.find(e => e.date === dateKey);
-        if (entry?.completed) {
-          completedCount++;
-        }
-      }
-      
-      // Calculate percentage (0 to 100)
-      const percentage = habitIdsToShow.length > 0 
-        ? (completedCount / habitIdsToShow.length) * 100
-        : 0;
-      completionPercentages.push(percentage);
-      
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    setChartData({
-      labels: dates.filter((_, i) => i % Math.ceil(days / 7) === 0), // Show ~7 labels
-      datasets: [{
-        data: completionPercentages,
-        color: (opacity = 1) => colors.greenLight,
-        strokeWidth: 2,
-      }],
-    });
+    // Chart data generation removed - we no longer track completion trends
+    setChartData(null);
   };
 
   const changeTimeRange = (days: number) => {
@@ -157,6 +171,7 @@ export default function ChartsScreen() {
     if (comparisonItems.length > 0) {
       generateComparisonChartData(comparisonItems, days);
     }
+    // Weekly activity chart is independent of time range
   };
 
   const toggleHabitSelection = (habitId: string) => {
@@ -469,6 +484,44 @@ export default function ChartsScreen() {
           </View>
         ) : (
           <>
+            {/* Weekly Activity Chart */}
+            {weeklyActivityData && weeklyActivityData.datasets && weeklyActivityData.datasets[0] && weeklyActivityData.datasets[0].data.length > 0 && (
+              <View style={styles.chartContainer}>
+                <Text style={styles.chartTitle}>Weekly Activity</Text>
+                <Text style={styles.chartSubtitle}>Days you logged something each week</Text>
+                <BarChart
+                  data={weeklyActivityData}
+                  width={screenWidth - spacing.lg * 2}
+                  height={220}
+                  chartConfig={{
+                    backgroundColor: colors.grey,
+                    backgroundGradientFrom: colors.grey,
+                    backgroundGradientTo: colors.grey,
+                    decimalPlaces: 0,
+                    color: (opacity = 1) => colors.greenLight,
+                    labelColor: (opacity = 1) => colors.greyVeryLight,
+                    style: {
+                      borderRadius: borderRadius.lg,
+                    },
+                    barPercentage: 0.7,
+                    formatYLabel: (value) => {
+                      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+                      if (isNaN(numValue)) return '0';
+                      return Math.round(numValue).toString();
+                    },
+                  }}
+                  style={styles.chart}
+                  withVerticalLabels={true}
+                  withHorizontalLabels={true}
+                  segments={4}
+                  yAxisLabel=""
+                  yAxisSuffix=""
+                  fromZero={true}
+                  showValuesOnTopOfBars={true}
+                />
+              </View>
+            )}
+
             {/* Time Range Selector */}
             <View style={styles.timeRangeSelector}>
               {[7, 30, 90].map(days => (
@@ -491,49 +544,6 @@ export default function ChartsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-
-            {/* Chart */}
-            {chartData && chartData.datasets && chartData.datasets[0] && chartData.datasets[0].data.length > 0 && (
-              <View style={styles.chartContainer}>
-                <Text style={styles.chartTitle}>Completion Trend</Text>
-                <LineChart
-                  data={chartData}
-                  width={screenWidth - spacing.lg * 2}
-                  height={220}
-                  chartConfig={{
-                    backgroundColor: colors.grey,
-                    backgroundGradientFrom: colors.grey,
-                    backgroundGradientTo: colors.grey,
-                    decimalPlaces: 0,
-                    color: (opacity = 1) => colors.greenLight,
-                    labelColor: (opacity = 1) => colors.greyVeryLight,
-                    style: {
-                      borderRadius: borderRadius.lg,
-                    },
-                    propsForDots: {
-                      r: '3',
-                      strokeWidth: '2',
-                    },
-                    formatYLabel: (value) => {
-                      // Format y-axis labels as percentages
-                      // Data is already in percentage format (0-100), just add the % sign
-                      const numValue = typeof value === 'string' ? parseFloat(value) : value;
-                      if (isNaN(numValue) || numValue < 0) return '0%';
-                      // Round to nearest integer for cleaner labels
-                      return `${Math.round(numValue)}%`;
-                    },
-                  }}
-                  bezier
-                  style={styles.chart}
-                  withVerticalLines={false}
-                  withHorizontalLines={true}
-                  segments={4}
-                  yAxisLabel=""
-                  yAxisSuffix=""
-                  fromZero={true}
-                />
-              </View>
-            )}
 
             {/* Comparison Chart */}
             <View style={styles.chartContainer}>
@@ -713,9 +723,9 @@ export default function ChartsScreen() {
                           </View>
                           <View style={styles.habitStatItem}>
                             <Text style={styles.habitStatValue}>
-                              {stats.completionRate.toFixed(0)}%
+                              {stats.totalDays}
                             </Text>
-                            <Text style={styles.habitStatLabel}>Completion</Text>
+                            <Text style={styles.habitStatLabel}>Times Logged</Text>
                           </View>
                         </View>
                       </View>
@@ -947,6 +957,11 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: fontSize.lg,
     fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  chartSubtitle: {
+    color: colors.greyVeryLight,
+    fontSize: fontSize.sm,
     marginBottom: spacing.md,
   },
   chart: {

@@ -40,7 +40,9 @@ module.exports = {
         "ACCESS_FINE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
         "SCHEDULE_EXACT_ALARM",
-        "USE_EXACT_ALARM"
+        "USE_EXACT_ALARM",
+        "POST_NOTIFICATIONS",
+        "FOREGROUND_SERVICE"
       ],
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false

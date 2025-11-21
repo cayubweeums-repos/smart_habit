@@ -19,7 +19,6 @@ import { loadHabits, getDailyLog, updateHabitEntry, loadDailyLogs } from '../sto
 import { getTodayKey, formatDisplayDate, getDayOfWeek, parseDateKey, formatDateKey, isToday, weatherMatches } from '../utils';
 import { fetchWeatherByCoordinates } from '../services/weatherService';
 import { loadLocationSettings } from '../storage/settingsStorage';
-import { checkWeatherDependentHabits } from '../services/notificationService';
 import { checkAutomaticHabits, isAutomaticHabit } from '../services/automaticHabitService';
 import { CATEGORY_DISPLAY_NAMES, CATEGORY_ORDER } from '../utils/prebuiltHabits';
 
@@ -62,8 +61,6 @@ export default function DailyLogScreen() {
       if (location) {
         const weather = await fetchWeatherByCoordinates(location.latitude, location.longitude);
         setCurrentWeather(weather);
-        // Check weather-dependent habits and send notifications if needed
-        checkWeatherDependentHabits();
       }
     } else {
       setCurrentWeather(null);

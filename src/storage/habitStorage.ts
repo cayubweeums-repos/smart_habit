@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Habit, DailyLog, HabitEntry, HabitStats } from '../types';
+import { parseDateKey } from '../utils';
 
 const HABITS_KEY = '@habits';
 const DAILY_LOGS_KEY = '@daily_logs';
@@ -196,35 +197,57 @@ export const calculateHabitStats = async (habitId: string): Promise<HabitStats> 
       .filter(entry => entry.habitId === habitId)
       .sort((a, b) => a.date.localeCompare(b.date));
     
+    // totalDays now represents days with any log entry (not just completed)
     const totalDays = entries.length;
+    
+    // Keep completedDays and completionRate for backward compatibility but they're not used
     const completedDays = entries.filter(e => e.completed).length;
     const completionRate = totalDays > 0 ? (completedDays / totalDays) * 100 : 0;
     
-    // Calculate current streak
+    // Calculate current streak - based on any entry (logged anything), not just completed
+    // Streak counts consecutive days with any log entry, counting backwards from most recent entry
     let currentStreak = 0;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].completed) {
+    
+    // Get unique dates that have entries (sorted)
+    const entryDates = Array.from(new Set(entries.map(e => e.date))).sort();
+    
+    if (entryDates.length > 0) {
+      // Start from the most recent entry date and count backwards
+      let checkDate = parseDateKey(entryDates[entryDates.length - 1]);
+      const entryDatesSet = new Set(entryDates);
+      
+      // Count consecutive days backwards from most recent entry
+      while (entryDatesSet.has(checkDate.toISOString().split('T')[0])) {
         currentStreak++;
-      } else {
-        break;
+        checkDate.setDate(checkDate.getDate() - 1);
       }
     }
     
-    // Calculate longest streak
+    // Calculate longest streak - based on any entry (logged anything)
+    // Find the longest sequence of consecutive days with entries
     let longestStreak = 0;
-    let tempStreak = 0;
-    for (const entry of entries) {
-      if (entry.completed) {
-        tempStreak++;
-        longestStreak = Math.max(longestStreak, tempStreak);
-      } else {
-        tempStreak = 0;
+    
+    if (entryDates.length > 0) {
+      let tempStreak = 1;
+      longestStreak = 1;
+      
+      for (let i = 1; i < entryDates.length; i++) {
+        const prevDate = parseDateKey(entryDates[i - 1]);
+        const currentDate = parseDateKey(entryDates[i]);
+        const daysDiff = Math.floor((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff === 1) {
+          // Consecutive day
+          tempStreak++;
+          longestStreak = Math.max(longestStreak, tempStreak);
+        } else {
+          // Gap in logging, reset streak
+          tempStreak = 1;
+        }
       }
     }
     
-    const lastCompletedEntry = entries
-      .reverse()
-      .find(e => e.completed);
+    const lastEntry = entries.length > 0 ? entries[entries.length - 1] : null;
     
     return {
       habitId,
@@ -233,7 +256,7 @@ export const calculateHabitStats = async (habitId: string): Promise<HabitStats> 
       completionRate,
       currentStreak,
       longestStreak,
-      lastCompletedDate: lastCompletedEntry?.date,
+      lastCompletedDate: lastEntry?.date,
     };
   } catch (error) {
     console.error('Error calculating habit stats:', error);

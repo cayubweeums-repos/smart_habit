@@ -59,7 +59,7 @@
 - Setting locations causes both morning and evening notifications to come at once
 
 - Create IPA Package
-```bash
+y```bash
 Run mkdir -p ./artifacts
   mkdir -p ./artifacts
   cd ./ios

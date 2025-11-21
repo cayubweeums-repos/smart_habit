@@ -1,28 +1,24 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
-import { checkWeatherDependentHabits } from './notificationService';
 
 const BACKGROUND_WEATHER_TASK = 'background-weather-check';
 
 /**
- * Background task that checks weather for weather-dependent habits
- * This runs even when the app is closed
+ * Background task placeholder
+ * This can be used for future background tasks if needed
  */
 try {
   TaskManager.defineTask(BACKGROUND_WEATHER_TASK, async () => {
     try {
-      console.log('[BackgroundTask] Running background weather check...');
-      await checkWeatherDependentHabits(false);
-      console.log('[BackgroundTask] Background weather check completed');
+      // Background task logic can be added here in the future
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
-      console.error('[BackgroundTask] Error in background weather check:', error);
+      console.error('[BackgroundTask] Error in background task:', error);
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
   });
-  console.log('[BackgroundTask] Task defined successfully:', BACKGROUND_WEATHER_TASK);
 } catch (error) {
-  console.error('[BackgroundTask] Error defining task (this may be expected in Expo Go):', error);
+  // Task definition may fail in Expo Go, which is expected
 }
 
 /**
