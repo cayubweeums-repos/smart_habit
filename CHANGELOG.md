@@ -5,6 +5,13 @@ All notable changes to Smart Habit Tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/cayubweeums-repos/smart_habit/compare/v1.2.0...v1.3.0) (2025-11-21)
+
+
+### ✨ Features
+
+* implements notifications, removes completion percentage tracking ([0a2a9f9](https://github.com/cayubweeums-repos/smart_habit/commit/0a2a9f93c02840c1c9dbf7bb60a04ce51a93ae49))
+
 ## [1.2.0](https://github.com/cayubweeums-repos/smart_habit/compare/v1.1.1...v1.2.0) (2025-11-19)
 
 
